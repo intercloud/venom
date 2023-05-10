@@ -18,6 +18,7 @@ import (
 	"github.com/ovh/venom/executors/smtp"
 	"github.com/ovh/venom/executors/sql"
 	"github.com/ovh/venom/executors/ssh"
+	"github.com/ovh/venom/executors/tavern"
 	"github.com/ovh/venom/executors/web"
 )
 
@@ -42,4 +43,5 @@ var Registry map[string]Constructor = map[string]Constructor{
 	ssh.Name:        ssh.New,
 	mongo.Name:      mongo.New,
 	web.Name:        web.New,
+	tavern.Name:     tavern.New,
 }

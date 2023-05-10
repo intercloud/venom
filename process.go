@@ -167,7 +167,6 @@ func (v *Venom) Parse(ctx context.Context, path []string) error {
 func (v *Venom) Process(ctx context.Context, path []string) error {
 	v.Tests.Status = StatusRun
 	v.Tests.Start = time.Now()
-	testsResult := &Tests{}
 	var vars H
 	Debug(ctx, "nb testsuites: %d", len(v.Tests.TestSuites))
 	for i := range v.Tests.TestSuites {
@@ -177,7 +176,6 @@ func (v *Venom) Process(ctx context.Context, path []string) error {
 		// ##### RUN Test Suite Here
 		v.runTestSuite(ctx, &v.Tests.TestSuites[i])
 		vars.AddAll(v.Tests.TestSuites[i].ComputedVars)
-		v.computeStats(testsResult, &v.Tests.TestSuites[i])
 
 		v.Tests.TestSuites[i].End = time.Now()
 		v.Tests.TestSuites[i].Duration = v.Tests.TestSuites[i].End.Sub(v.Tests.TestSuites[i].Start).Seconds()
