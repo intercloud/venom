@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"runtime"
@@ -29,7 +28,7 @@ func New() venom.Executor {
 
 // Executor represents a Test Exec
 type Executor struct {
-	Script string `json:"script,omitempty" yaml:"script,omitempty"`
+	Script *string `json:"script,omitempty" yaml:"script,omitempty"`
 }
 
 // Result represents a step result
@@ -50,7 +49,7 @@ func (Executor) ZeroValueResult() interface{} {
 
 // GetDefaultAssertions return default assertions for type exec
 func (Executor) GetDefaultAssertions() *venom.StepAssertions {
-	return &venom.StepAssertions{Assertions: []string{"result.code ShouldEqual 0"}}
+	return &venom.StepAssertions{Assertions: []venom.Assertion{"result.code ShouldEqual 0"}}
 }
 
 // Run execute TestStep of type exec
@@ -60,11 +59,11 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 		return nil, err
 	}
 
-	if e.Script == "" {
+	if e.Script != nil && *e.Script == "" {
 		return nil, fmt.Errorf("Invalid command")
 	}
 
-	scriptContent := e.Script
+	scriptContent := *e.Script
 
 	// Default shell is sh
 	shell := "/bin/sh"
@@ -84,7 +83,7 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 	}
 
 	// Create a tmp file
-	tmpscript, err := ioutil.TempFile(os.TempDir(), "venom-")
+	tmpscript, err := os.CreateTemp(os.TempDir(), "venom-")
 	if err != nil {
 		return nil, fmt.Errorf("cannot create tmp file: %s", err)
 	}
@@ -149,7 +148,7 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 		for {
 			line, errs := stdoutreader.ReadString('\n')
 			if errs != nil {
-				// ReadString returns what has been read even though an error was encoutered
+				// ReadString returns what has been read even though an error was encountered
 				// ie. capture outputs with no '\n' at the end
 				result.Systemout += line
 				stdout.Close()
@@ -166,7 +165,7 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 		for {
 			line, errs := stderrreader.ReadString('\n')
 			if errs != nil {
-				// ReadString returns what has been read even though an error was encoutered
+				// ReadString returns what has been read even though an error was encountered
 				// ie. capture outputs with no '\n' at the end
 				result.Systemerr += line
 				stderr.Close()
@@ -182,7 +181,7 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 		result.Err = err.Error()
 		result.Code = "127"
 		venom.Debug(ctx, err.Error())
-		return dump.ToMap(e, nil, dump.WithDefaultLowerCaseFormatter())
+		return dump.ToMap(e, dump.WithDefaultLowerCaseFormatter())
 	}
 
 	<-outchan

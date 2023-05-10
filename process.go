@@ -3,10 +3,10 @@ package venom
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	nested "github.com/antonfisher/nested-logrus-formatter"
 	"github.com/gosimple/slug"
@@ -16,12 +16,8 @@ import (
 
 // InitLogger initializes venom logger
 func (v *Venom) InitLogger() error {
-	v.testsuites = []TestSuite{}
-	if v.Verbose == 0 {
-		logrus.SetLevel(logrus.WarnLevel)
-	} else {
-		logrus.SetLevel(logrus.DebugLevel)
-	}
+	v.Tests.TestSuites = []TestSuite{}
+	logrus.SetLevel(logrus.DebugLevel)
 
 	if v.OutputDir != "" {
 		if err := os.MkdirAll(v.OutputDir, os.FileMode(0755)); err != nil {
@@ -29,31 +25,49 @@ func (v *Venom) InitLogger() error {
 		}
 	}
 
-	if v.Verbose > 0 {
-		var err error
-		var logFile = filepath.Join(v.OutputDir, "venom.log")
-		_ = os.RemoveAll(logFile)
-		v.LogOutput, err = os.OpenFile(logFile, os.O_CREATE|os.O_RDWR, os.FileMode(0644))
-		if err != nil {
-			return errors.Wrapf(err, "unable to write log file")
-		}
-
-		v.PrintlnTrace("writing " + logFile)
-
-		logrus.SetOutput(v.LogOutput)
-	} else {
-		logrus.SetOutput(ioutil.Discard)
+	var err error
+	var logFile = filepath.Join(v.OutputDir, computeOutputFilename("venom.log"))
+	v.LogOutput, err = os.OpenFile(logFile, os.O_CREATE|os.O_RDWR, os.FileMode(0644))
+	if err != nil {
+		return errors.Wrapf(err, "unable to write log file")
 	}
+	v.PrintlnTrace("writing " + logFile)
+	logrus.SetOutput(v.LogOutput)
 
 	logrus.SetFormatter(&nested.Formatter{
-		HideKeys:    true,
-		FieldsOrder: []string{"testsuite", "testcase", "step", "executor"},
+		HideKeys:       true,
+		FieldsOrder:    []string{"testsuite", "testcase", "step", "executor"},
+		NoColors:       true,
+		NoFieldsColors: true,
 	})
 	logger = logrus.NewEntry(logrus.StandardLogger())
 
 	slug.Lowercase = false
 
 	return nil
+}
+
+func computeOutputFilename(filename string) string {
+	// example of filename: venom.log
+	t := strings.Split(filename, ".")
+
+	if !fileExists(filename) {
+		return filename
+	}
+	for i := 0; ; i++ {
+		filename := fmt.Sprintf("%s.%d.%s", t[0], i, t[1])
+		if !fileExists(filename) {
+			return filename
+		}
+	}
+}
+
+func fileExists(filename string) bool {
+	info, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return !info.IsDir()
 }
 
 // Parse parses tests suite to check context and variables
@@ -69,17 +83,17 @@ func (v *Venom) Parse(ctx context.Context, path []string) error {
 
 	missingVars := []string{}
 	extractedVars := []string{}
-	for i := range v.testsuites {
-		ts := &v.testsuites[i]
+	for i := range v.Tests.TestSuites {
+		ts := &v.Tests.TestSuites[i]
 		ts.Vars.Add("venom.testsuite", ts.Name)
 
-		Info(ctx, "Parsing testsuite %s : %+v", ts.Package, ts.Vars)
+		Info(ctx, "Parsing testsuite %s : %+v", ts.Filepath, ts.Vars)
 		tvars, textractedVars, err := v.parseTestSuite(ts)
 		if err != nil {
 			return err
 		}
 
-		Debug(ctx, "Testsuite (%s) variables: %+v", ts.Package, ts.Vars)
+		Debug(ctx, "Testsuite (%s) variables: %+v", ts.Filepath, ts.Vars)
 		for k := range ts.Vars {
 			textractedVars = append(textractedVars, k)
 		}
@@ -116,9 +130,13 @@ func (v *Venom) Parse(ctx context.Context, path []string) error {
 
 	reallyMissingVars := []string{}
 	for _, k := range missingVars {
+		// Skip "range" builtin variables
+		if strings.HasPrefix(k, "value") || k == "index" || k == "key" {
+			continue
+		}
 		var varExtracted bool
 		for _, e := range extractedVars {
-			if strings.HasPrefix(k, e) {
+			if k == e || strings.HasPrefix(k, e) {
 				varExtracted = true
 				break
 			}
@@ -139,36 +157,53 @@ func (v *Venom) Parse(ctx context.Context, path []string) error {
 	}
 
 	if len(reallyMissingVars) > 0 {
-		return fmt.Errorf("Missing variables %v", reallyMissingVars)
+		return fmt.Errorf("missing variables %v", reallyMissingVars)
 	}
 
 	return nil
 }
 
 // Process runs tests suite and return a Tests result
-func (v *Venom) Process(ctx context.Context, path []string) (*Tests, error) {
+func (v *Venom) Process(ctx context.Context, path []string) error {
+	v.Tests.Status = StatusRun
+	v.Tests.Start = time.Now()
 	testsResult := &Tests{}
 	var vars H
-	Debug(ctx, "nb testsuites: %d", len(v.testsuites))
-	for i := range v.testsuites {
-		v.testsuites[i].Vars = vars
-		v.runTestSuite(ctx, &v.testsuites[i])
-		vars.AddAll(v.testsuites[i].ComputedVars)
-		v.computeStats(testsResult, &v.testsuites[i])
-	}
-	return testsResult, nil
-}
+	Debug(ctx, "nb testsuites: %d", len(v.Tests.TestSuites))
+	for i := range v.Tests.TestSuites {
 
-func (v *Venom) computeStats(testsResult *Tests, ts *TestSuite) {
-	testsResult.TestSuites = append(testsResult.TestSuites, *ts)
-	if ts.Failures > 0 || ts.Errors > 0 {
-		testsResult.TotalKO += (ts.Failures + ts.Errors)
+		v.Tests.TestSuites[i].Vars = vars
+		v.Tests.TestSuites[i].Start = time.Now()
+		// ##### RUN Test Suite Here
+		v.runTestSuite(ctx, &v.Tests.TestSuites[i])
+		vars.AddAll(v.Tests.TestSuites[i].ComputedVars)
+		v.computeStats(testsResult, &v.Tests.TestSuites[i])
+
+		v.Tests.TestSuites[i].End = time.Now()
+		v.Tests.TestSuites[i].Duration = v.Tests.TestSuites[i].End.Sub(v.Tests.TestSuites[i].Start).Seconds()
+	}
+	v.Tests.End = time.Now()
+	v.Tests.Duration = v.Tests.End.Sub(v.Tests.Start).Seconds()
+
+	var isFailed bool
+	var nSkip int
+	for i := range v.Tests.TestSuites {
+		if v.Tests.TestSuites[i].Status == StatusFail {
+			isFailed = true
+			break
+		} else if v.Tests.TestSuites[i].Status == StatusSkip {
+			nSkip++
+		}
+	}
+	if isFailed {
+		v.Tests.Status = StatusFail
+	} else if nSkip > 0 && nSkip == len(v.Tests.TestSuites) {
+		v.Tests.Status = StatusSkip
 	} else {
-		testsResult.TotalOK += len(ts.TestCases) - (ts.Failures + ts.Errors)
-	}
-	if ts.Skipped > 0 {
-		testsResult.TotalSkipped += ts.Skipped
+		v.Tests.Status = StatusPass
 	}
 
-	testsResult.Total = testsResult.TotalKO + testsResult.TotalOK + testsResult.TotalSkipped
+	Debug(ctx, "final status: %s", v.Tests.Status)
+
+	return nil
 }

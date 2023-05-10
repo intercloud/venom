@@ -1,14 +1,25 @@
 package venom
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cast"
+)
+
+type Status string
+
+const (
+	StatusRun  Status = "RUN"
+	StatusFail Status = "FAIL"
+	StatusSkip Status = "SKIP"
+	StatusPass Status = "PASS"
 )
 
 type H map[string]interface{}
@@ -49,74 +60,151 @@ func (h *H) AddAllWithPrefix(p string, h2 H) {
 	}
 }
 
+// Assertion (usually a string, but could be a dictionary when using logical operators)
+type Assertion interface{}
+
 // StepAssertions contains step assertions
 type StepAssertions struct {
-	Assertions []string `json:"assertions,omitempty" yaml:"assertions,omitempty"`
+	Assertions []Assertion `json:"assertions,omitempty" yaml:"assertions,omitempty"`
 }
 
-// Tests contains all informations about tests in a pipeline build
+type TestsXML struct {
+	XMLName    xml.Name       `xml:"testsuites" json:"-" yaml:"-"`
+	TestSuites []TestSuiteXML `xml:"testsuite" json:"test_suites"`
+}
+
 type Tests struct {
-	XMLName      xml.Name    `xml:"testsuites" json:"-" yaml:"-"`
-	Total        int         `xml:"-" json:"total"`
-	TotalOK      int         `xml:"-" json:"ok"`
-	TotalKO      int         `xml:"-" json:"ko"`
-	TotalSkipped int         `xml:"-" json:"skipped"`
-	TestSuites   []TestSuite `xml:"testsuite" json:"test_suites"`
+	TestSuites       []TestSuite `json:"test_suites" yml:"tests_suites"`
+	Status           Status      `json:"status" yml:"status"`
+	NbTestsuitesFail int         `json:"nbTestsuitesFail"  yaml:"-"`
+	NbTestsuitesPass int         `json:"nbTestsuitesPass"  yaml:"-"`
+	NbTestsuitesSkip int         `json:"nbTestsuitesSkip"  yaml:"-"`
+	Duration         float64     `json:"duration" yaml:"-"`
+	Start            time.Time   `json:"start" yaml:"-"`
+	End              time.Time   `json:"end" yaml:"-"`
 }
 
 // TestSuite is a single JUnit test suite which may contain many
 // testcases.
-type TestSuite struct {
-	XMLName      xml.Name   `xml:"testsuite" json:"-" yaml:"-"`
-	Disabled     int        `xml:"disabled,attr,omitempty" json:"disabled" yaml:""`
-	Errors       int        `xml:"errors,attr,omitempty" json:"errors" yaml:"-"`
-	Failures     int        `xml:"failures,attr,omitempty" json:"failures" yaml:"-"`
-	Hostname     string     `xml:"hostname,attr,omitempty" json:"hostname" yaml:"-"`
-	ID           string     `xml:"id,attr,omitempty" json:"id" yaml:"-"`
-	Name         string     `xml:"name,attr" json:"name" yaml:"name"`
-	Filename     string     `xml:"-" json:"-" yaml:"-"`
-	Package      string     `xml:"package,attr,omitempty" json:"package" yaml:"-"`
-	Properties   []Property `xml:"-" json:"properties" yaml:"-"`
-	Skipped      int        `xml:"skipped,attr,omitempty" json:"skipped" yaml:"skipped,omitempty"`
-	Total        int        `xml:"tests,attr" json:"total" yaml:"total,omitempty"`
-	TestCases    []TestCase `xml:"testcase" json:"testcases" yaml:"testcases"`
-	Version      string     `xml:"version,omitempty" json:"version" yaml:"version,omitempty"`
-	Time         string     `xml:"time,attr,omitempty" json:"time" yaml:"-"`
-	Timestamp    string     `xml:"timestamp,attr,omitempty" json:"timestamp" yaml:"-"`
-	Vars         H          `xml:"-" json:"-" yaml:"vars"`
-	ComputedVars H          `xml:"-" json:"-" yaml:"-"`
-	WorkDir      string     `xml:"-" json:"-" yaml:"-"`
+type TestSuiteXML struct {
+	XMLName   xml.Name      `xml:"testsuite" json:"-" yaml:"-"`
+	Disabled  int           `xml:"disabled,attr,omitempty" json:"disabled" yaml:""`
+	Errors    int           `xml:"errors,attr,omitempty" json:"errors" yaml:"-"`
+	Failures  int           `xml:"failures,attr,omitempty" json:"failures" yaml:"-"`
+	Hostname  string        `xml:"hostname,attr,omitempty" json:"hostname" yaml:"-"`
+	ID        string        `xml:"id,attr,omitempty" json:"id" yaml:"-"`
+	Name      string        `xml:"name,attr" json:"name" yaml:"name"`
+	Package   string        `xml:"package,attr,omitempty" json:"package" yaml:"-"`
+	Skipped   int           `xml:"skipped,attr,omitempty" json:"skipped" yaml:"skipped,omitempty"`
+	Total     int           `xml:"tests,attr" json:"total" yaml:"total,omitempty"`
+	TestCases []TestCaseXML `xml:"testcase" json:"testcases" yaml:"testcases"`
+	Version   string        `xml:"version,omitempty" json:"version" yaml:"version,omitempty"`
+	Time      string        `xml:"time,attr,omitempty" json:"time" yaml:"-"`
+	Timestamp string        `xml:"timestamp,attr,omitempty" json:"timestamp" yaml:"-"`
 }
 
-// Property represents a key/value pair used to define properties.
-type Property struct {
-	XMLName xml.Name `xml:"property" json:"-" yaml:"-"`
-	Name    string   `xml:"name,attr" json:"name" yaml:"-"`
-	Value   string   `xml:"value,attr" json:"value" yaml:"-"`
+type TestSuiteInput struct {
+	Name      string          `json:"name" yaml:"name"`
+	TestCases []TestCaseInput `json:"testcases" yaml:"testcases"`
+	Vars      H               `json:"vars" yaml:"vars"`
+}
+
+type TestSuite struct {
+	Name      string     `json:"name" yaml:"name"`
+	TestCases []TestCase `json:"testcases" yaml:"testcases"`
+	Vars      H          `json:"vars" yaml:"vars"`
+
+	// computed
+	ShortName    string `json:"shortname" yaml:"-"`
+	Filename     string `json:"filename" yaml:"-"`
+	Filepath     string `json:"filepath" yaml:"-"`
+	ComputedVars H      `json:"computed_vars" yaml:"-"`
+	WorkDir      string `json:"workdir" yaml:"_"`
+	Status       Status `json:"status" yaml:"status"`
+
+	Duration float64   `json:"duration" yaml:"-"`
+	Start    time.Time `json:"start" yaml:"-"`
+	End      time.Time `json:"end" yaml:"-"`
+
+	NbTestcasesFail int `json:"nbTestcasesFail"  yaml:"-"`
+	NbTestcasesPass int `json:"nbTestcasesPass"  yaml:"-"`
+	NbTestcasesSkip int `json:"nbTestcasesSkip"  yaml:"-"`
 }
 
 // TestCase is a single test case with its result.
+type TestCaseXML struct {
+	XMLName   xml.Name     `xml:"testcase" json:"-" yaml:"-"`
+	Classname string       `xml:"classname,attr,omitempty" json:"classname" yaml:"-"`
+	Errors    []FailureXML `xml:"error,omitempty" json:"errors" yaml:"errors,omitempty"`
+	Failures  []FailureXML `xml:"failure,omitempty" json:"failures" yaml:"failures,omitempty"`
+	Name      string       `xml:"name,attr" json:"name" yaml:"name"`
+	Skipped   []Skipped    `xml:"skipped,omitempty" json:"skipped" yaml:"skipped,omitempty"`
+	Systemout InnerResult  `xml:"system-out,omitempty" json:"systemout" yaml:"systemout,omitempty"`
+	Systemerr InnerResult  `xml:"system-err,omitempty" json:"systemerr" yaml:"systemerr,omitempty"`
+	Time      float64      `xml:"time,attr,omitempty" json:"time" yaml:"time,omitempty"`
+}
+
+type TestCaseInput struct {
+	Name         string            `json:"name" yaml:"name"`
+	Vars         H                 `json:"vars" yaml:"vars"`
+	Skip         []string          `json:"skip" yaml:"skip"`
+	RawTestSteps []json.RawMessage `json:"steps" yaml:"steps"`
+}
+
 type TestCase struct {
-	XMLName         xml.Name  `xml:"testcase" json:"-" yaml:"-"`
-	Classname       string    `xml:"classname,attr,omitempty" json:"classname" yaml:"-"`
-	Errors          []Failure `xml:"error,omitempty" json:"errors" yaml:"errors,omitempty"`
-	Failures        []Failure `xml:"failure,omitempty" json:"failures" yaml:"failures,omitempty"`
-	Name            string    `xml:"name,attr" json:"name" yaml:"name"`
-	originalName    string
-	Skipped         []Skipped         `xml:"skipped,omitempty" json:"skipped" yaml:"skipped,omitempty"`
-	Status          string            `xml:"status,attr,omitempty" json:"status" yaml:"status,omitempty"`
-	Systemout       InnerResult       `xml:"system-out,omitempty" json:"systemout" yaml:"systemout,omitempty"`
-	Systemerr       InnerResult       `xml:"system-err,omitempty" json:"systemerr" yaml:"systemerr,omitempty"`
-	Time            string            `xml:"time,attr,omitempty" json:"time" yaml:"time,omitempty"`
-	RawTestSteps    []json.RawMessage `xml:"-" json:"steps" yaml:"steps"`
-	testSteps       []TestStep
-	TestSuiteVars   H `xml:"-" json:"-" yaml:"-"`
-	Vars            H `xml:"-" json:"-" yaml:"vars"`
-	computedVars    H
-	computedInfo    []string
-	computedVerbose []string
-	Skip            []string `xml:"-" json:"skip" yaml:"skip"`
-	IsExecutor      bool     `xml:"-" json:"-" yaml:"-"`
+	TestCaseInput
+
+	// Computed
+	originalName string
+	Skipped      []Skipped `json:"skipped" yaml:"-"`
+	Status       Status    `json:"status" yaml:"-"`
+
+	Duration float64   `json:"duration" yaml:"-"`
+	Start    time.Time `json:"start" yaml:"-"`
+	End      time.Time `json:"end" yaml:"-"`
+
+	testSteps       []TestStep       `json:"-" yaml:"-"`
+	TestStepResults []TestStepResult `json:"results" yaml:"-"`
+	TestSuiteVars   H                `json:"-" yaml:"-"`
+
+	computedVars    H        `json:"-" yaml:"-"`
+	computedInfo    []string `json:"-" yaml:"-"`
+	computedVerbose []string `json:"-" yaml:"-"`
+	IsExecutor      bool     `json:"-" yaml:"-"`
+	IsEvaluated     bool     `json:"-" yaml:"-"`
+}
+
+type TestStepResult struct {
+	Name              string            `json:"name"`
+	Errors            []Failure         `json:"errors"`
+	Skipped           []Skipped         `json:"skipped" yaml:"skipped"`
+	Status            Status            `json:"status" yaml:"status"`
+	Raw               interface{}       `json:"raw" yaml:"raw"`
+	Interpolated      interface{}       `json:"interpolated" yaml:"interpolated"`
+	Number            int               `json:"number" yaml:"number"`
+	RangedIndex       int               `json:"rangedIndex" yaml:"rangedIndex"`
+	RangedEnable      bool              `json:"rangedEnable" yaml:"rangedEnable"`
+	InputVars         map[string]string `json:"inputVars" yaml:"-"`
+	ComputedVars      H                 `json:"computedVars" yaml:"-"`
+	ComputedInfo      []string          `json:"computedInfos" yaml:"-"`
+	AssertionsApplied AssertionsApplied `json:"assertionsApplied" yaml:"-"`
+	Retries           int               `json:"retries" yaml:"retries"`
+
+	Systemout string    `json:"systemout"`
+	Systemerr string    `json:"systemerr"`
+	Duration  float64   `json:"duration"`
+	Start     time.Time `json:"start"`
+	End       time.Time `json:"end"`
+}
+
+func (ts *TestStepResult) appendError(err error) {
+	ts.Errors = append(ts.Errors, Failure{Value: RemoveNotPrintableChar(err.Error())})
+	ts.Status = StatusFail
+}
+
+// Append an error to a test step and its associated test case
+func (ts *TestStepResult) appendFailure(failure ...Failure) {
+	ts.Errors = append(ts.Errors, failure...)
 }
 
 // TestStep represents a testStep
@@ -147,16 +235,29 @@ func (t TestStep) StringSliceValue(name string) ([]string, error) {
 		}
 		return out, nil
 	}
+	//If string is empty, return an empty slice instead
+	if len(out) == 0 {
+		return []string{}, nil
+	}
 	return []string{out}, nil
+}
+
+// Range contains data related to iterable user values
+type Range struct {
+	Enabled    bool
+	Items      []RangeData
+	RawContent interface{} `json:"range"`
+}
+
+// RangeData contains a single iterable user value
+type RangeData struct {
+	Key   string
+	Value interface{}
 }
 
 // Skipped contains data related to a skipped test.
 type Skipped struct {
 	Value string `xml:",cdata" json:"value" yaml:"value,omitempty"`
-}
-
-func (tc *TestCase) AppendError(err error) {
-	tc.Errors = append(tc.Errors, Failure{Value: RemoveNotPrintableChar(err.Error())})
 }
 
 // Failure contains data related to a failed test.
@@ -166,37 +267,45 @@ type Failure struct {
 	TestcaseLineNumber int    `xml:"-" json:"-" yaml:"-"`
 	StepNumber         int    `xml:"-" json:"-" yaml:"-"`
 	Assertion          string `xml:"-" json:"-" yaml:"-"`
+	AssertionRequired  bool   `xml:"-" json:"-" yaml:"-"`
 	Error              error  `xml:"-" json:"-" yaml:"-"`
 
+	Value string `json:"value" yaml:"value,omitempty"`
+}
+
+type FailureXML struct {
 	Value   string `xml:",cdata" json:"value" yaml:"value,omitempty"`
 	Type    string `xml:"type,attr,omitempty" json:"type" yaml:"type,omitempty"`
 	Message string `xml:"message,attr,omitempty" json:"message" yaml:"message,omitempty"`
 }
 
-func newFailure(tc TestCase, stepNumber int, assertion string, err error) *Failure {
-	var lineNumber = findLineNumber(tc.Classname, tc.originalName, stepNumber, assertion, -1)
+func newFailure(ctx context.Context, tc TestCase, stepNumber int, rangedIndex int, assertion string, err error) *Failure {
+	filename := StringVarFromCtx(ctx, "venom.testsuite.filename")
+	var lineNumber = findLineNumber(filename, tc.originalName, stepNumber, assertion, -1)
 	var value string
 	if assertion != "" {
-		value = color.YellowString(`Testcase %q, step #%d: Assertion %q failed. %s (%v:%d)`,
+		value = fmt.Sprintf(`Testcase %q, step #%d-%d: Assertion %q failed. %s (%v:%d)`,
 			tc.originalName,
 			stepNumber,
+			rangedIndex,
 			RemoveNotPrintableChar(assertion),
 			RemoveNotPrintableChar(err.Error()),
-			tc.Classname,
+			filename,
 			lineNumber,
 		)
 	} else {
-		value = color.YellowString(`Testcase %q, step #%d: %s (%v:%d)`,
+		value = fmt.Sprintf(`Testcase %q, step #%d-%d: %s (%v:%d)`,
 			tc.originalName,
 			stepNumber,
+			rangedIndex,
 			RemoveNotPrintableChar(err.Error()),
-			tc.Classname,
+			filename,
 			lineNumber,
 		)
 	}
 
 	var failure = Failure{
-		TestcaseClassname:  tc.Classname,
+		TestcaseClassname:  filename,
 		TestcaseName:       tc.Name,
 		TestcaseLineNumber: lineNumber,
 		StepNumber:         stepNumber,
@@ -210,12 +319,12 @@ func newFailure(tc TestCase, stepNumber int, assertion string, err error) *Failu
 
 func (f Failure) String() string {
 	if f.Value != "" {
-		return f.Value
+		return color.YellowString(f.Value)
 	}
 	if f.Error != nil {
-		return f.Error.Error()
+		return color.YellowString(f.Error.Error())
 	}
-	return f.Message
+	return ""
 }
 
 // InnerResult is used by TestCase
@@ -228,11 +337,12 @@ type AssignStep struct {
 }
 
 type Assignment struct {
-	From  string `json:"from" yaml:"from"`
-	Regex string `json:"regex" yaml:"regex"`
+	From    string      `json:"from" yaml:"from"`
+	Regex   string      `json:"regex" yaml:"regex"`
+	Default interface{} `json:"default" yaml:"default"`
 }
 
-// RemoveNotPrintableChar removes not printable chararacter from a string
+// RemoveNotPrintableChar removes not printable character from a string
 func RemoveNotPrintableChar(in string) string {
 	m := func(r rune) rune {
 		if unicode.IsPrint(r) || unicode.IsSpace(r) || unicode.IsPunct(r) {
@@ -242,3 +352,9 @@ func RemoveNotPrintableChar(in string) string {
 	}
 	return strings.Map(m, in)
 }
+
+var Red = color.New(color.FgRed).SprintFunc()
+var Yellow = color.New(color.FgYellow).SprintFunc()
+var Green = color.New(color.FgGreen).SprintFunc()
+var Cyan = color.New(color.FgCyan).SprintFunc()
+var Gray = color.New(color.Attribute(90)).SprintFunc()

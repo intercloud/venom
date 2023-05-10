@@ -60,16 +60,16 @@ type Message struct {
 
 // Result represents a step result.
 type Result struct {
-	TimeSeconds  float64       `json:"timeSeconds" yaml:"timeSeconds"`
+	TimeSeconds  float64       `json:"timeseconds" yaml:"timeSeconds"`
 	Topics       []string      `json:"topics" yaml:"topics"`
 	Messages     []interface{} `json:"messages" yaml:"messages"`
-	MessagesJSON []interface{} `json:"messagesJSON" yaml:"messagesJSON"`
-	Err          string        `json:"error" yaml:"error"`
+	MessagesJSON []interface{} `json:"messagesjson" yaml:"messagesJSON"`
+	Err          string        `json:"err" yaml:"error"`
 }
 
 // GetDefaultAssertions return default assertions for type exec
 func (Executor) GetDefaultAssertions() *venom.StepAssertions {
-	return &venom.StepAssertions{Assertions: []string{"result.error ShouldBeEmpty"}}
+	return &venom.StepAssertions{Assertions: []venom.Assertion{"result.error ShouldBeEmpty"}}
 }
 
 func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, error) {

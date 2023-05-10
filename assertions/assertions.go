@@ -1,6 +1,7 @@
 package assertions
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -56,6 +57,9 @@ var assertMap = map[string]AssertFunc{
 	"ShouldHappenAfter":            ShouldHappenAfter,
 	"ShouldHappenOnOrAfter":        ShouldHappenOnOrAfter,
 	"ShouldHappenBetween":          ShouldHappenBetween,
+	"ShouldTimeEqual":              ShouldTimeEqual,
+	"ShouldBeArray":                ShouldBeArray,
+	"ShouldBeMap":                  ShouldBeMap,
 }
 
 func Get(s string) (AssertFunc, bool) {
@@ -74,6 +78,28 @@ func deepEqual(x, y interface{}) bool {
 	return true
 }
 
+func ShouldBeArray(actual interface{}, expected ...interface{}) error {
+	if err := need(0, expected); err != nil {
+		return err
+	}
+	_, err := cast.ToSliceE(actual)
+	if err != nil {
+		return fmt.Errorf("expected: %v to be an array but was not", actual)
+	}
+	return nil
+}
+
+func ShouldBeMap(actual interface{}, expected ...interface{}) error {
+	if err := need(0, expected); err != nil {
+		return err
+	}
+	_, err := cast.ToStringMapE(actual)
+	if err != nil {
+		return fmt.Errorf("expected: %v to be a map but was not", actual)
+	}
+	return nil
+}
+
 // ShouldEqual receives exactly two parameters and does an equality check.
 //
 // Example of testsuite file:
@@ -88,7 +114,7 @@ func deepEqual(x, y interface{}) bool {
 //
 func ShouldEqual(actual interface{}, expected ...interface{}) error {
 	// if expected is an array, we consider that this array is an array of string
-	// so, we concat all values before doing the comparaison
+	// so, we concat all values before doing the comparison
 	if len(expected) > 0 {
 		var args string
 		for i := range expected {
@@ -264,24 +290,33 @@ func ShouldBeGreaterThan(actual interface{}, expected ...interface{}) error {
 		return newAssertionError(needSameType)
 	}
 
-	actualF, err := cast.ToFloat64E(actual)
-	if err != nil {
-		actualS, err := cast.ToStringE(actual)
+	var actualF float64
+	var err error
+	switch x := actual.(type) {
+	case json.Number:
+		actualF, err = x.Float64()
 		if err != nil {
 			return err
 		}
-
-		expectedS, err := cast.ToStringE(expected[0])
+	default:
+		actualF, err = cast.ToFloat64E(actual)
 		if err != nil {
-			return err
+			actualS, err := cast.ToStringE(actual)
+			if err != nil {
+				return err
+			}
+
+			expectedS, err := cast.ToStringE(expected[0])
+			if err != nil {
+				return err
+			}
+
+			if actualS > expectedS {
+				return nil
+			}
+
+			return fmt.Errorf("expected: %v greater than %v but it wasn't", actual, expected[0])
 		}
-
-		if actualS > expectedS {
-			return nil
-		}
-
-		return fmt.Errorf("expected: %v greater than %v but it wasn't", actual, expected[0])
-
 	}
 
 	expectedF, err := cast.ToFloat64E(expected[0])
@@ -306,24 +341,34 @@ func ShouldBeGreaterThanOrEqualTo(actual interface{}, expected ...interface{}) e
 		return newAssertionError(needSameType)
 	}
 
-	actualF, err := cast.ToFloat64E(actual)
-	if err != nil {
-		actualS, err := cast.ToStringE(actual)
+	var actualF float64
+	var err error
+	switch x := actual.(type) {
+	case json.Number:
+		actualF, err = x.Float64()
 		if err != nil {
 			return err
 		}
-
-		expectedS, err := cast.ToStringE(expected[0])
+	default:
+		actualF, err = cast.ToFloat64E(actual)
 		if err != nil {
-			return err
+			actualS, err := cast.ToStringE(actual)
+			if err != nil {
+				return err
+			}
+
+			expectedS, err := cast.ToStringE(expected[0])
+			if err != nil {
+				return err
+			}
+
+			if actualS >= expectedS {
+				return nil
+			}
+
+			return fmt.Errorf("expected: %v greater than or equals to %v but it wasn't", actual, expected[0])
+
 		}
-
-		if actualS >= expectedS {
-			return nil
-		}
-
-		return fmt.Errorf("expected: %v greater than or equals to %v but it wasn't", actual, expected[0])
-
 	}
 
 	expectedF, err := cast.ToFloat64E(expected[0])
@@ -348,23 +393,34 @@ func ShouldBeLessThan(actual interface{}, expected ...interface{}) error {
 		return newAssertionError(needSameType)
 	}
 
-	actualF, err := cast.ToFloat64E(actual)
-	if err != nil {
-		actualS, err := cast.ToStringE(actual)
+	var actualF float64
+	var err error
+	switch x := actual.(type) {
+	case json.Number:
+		actualF, err = x.Float64()
 		if err != nil {
 			return err
 		}
-
-		expectedS, err := cast.ToStringE(expected[0])
+	default:
+		actualF, err = cast.ToFloat64E(actual)
 		if err != nil {
-			return err
-		}
+			actualS, err := cast.ToStringE(actual)
+			if err != nil {
+				return err
+			}
 
-		if actualS < expectedS {
-			return nil
-		}
+			expectedS, err := cast.ToStringE(expected[0])
+			if err != nil {
+				return err
+			}
 
-		return fmt.Errorf("expected: %v less than %v but it wasn't", actual, expected[0])
+			if actualS < expectedS {
+				return nil
+			}
+
+			return fmt.Errorf("expected: %v less than %v but it wasn't", actual, expected[0])
+
+		}
 	}
 
 	expectedF, err := cast.ToFloat64E(expected[0])
@@ -389,23 +445,33 @@ func ShouldBeLessThanOrEqualTo(actual interface{}, expected ...interface{}) erro
 		return newAssertionError(needSameType)
 	}
 
-	actualF, err := cast.ToFloat64E(actual)
-	if err != nil {
-		actualS, err := cast.ToStringE(actual)
+	var actualF float64
+	var err error
+	switch x := actual.(type) {
+	case json.Number:
+		actualF, err = x.Float64()
 		if err != nil {
 			return err
 		}
-
-		expectedS, err := cast.ToStringE(expected[0])
+	default:
+		actualF, err = cast.ToFloat64E(actual)
 		if err != nil {
-			return err
-		}
+			actualS, err := cast.ToStringE(actual)
+			if err != nil {
+				return err
+			}
 
-		if actualS <= expectedS {
-			return nil
-		}
+			expectedS, err := cast.ToStringE(expected[0])
+			if err != nil {
+				return err
+			}
 
-		return fmt.Errorf("expected: %v less than or equals to %v but it wasn't", actual, expected[0])
+			if actualS <= expectedS {
+				return nil
+			}
+
+			return fmt.Errorf("expected: %v less than or equals to %v but it wasn't", actual, expected[0])
+		}
 	}
 
 	expectedF, err := cast.ToFloat64E(expected[0])
@@ -481,11 +547,14 @@ func ShouldNotBeBetweenOrEqual(actual interface{}, expected ...interface{}) erro
 	return fmt.Errorf("expected '%v' not between or equal to %v and %v but it was", actual, expected[0], expected[1])
 }
 
-// ShouldContain receives exactly two parameters. The first is a slice and the
+// ShouldContain receives exactly two parameters. The first is a slice or a single value and the
 // second is a proposed member. Membership is determined using ShouldEqual.
 func ShouldContain(actual interface{}, expected ...interface{}) error {
 	if err := need(1, expected); err != nil {
 		return err
+	}
+	if actual == nil || reflect.TypeOf(actual).Kind() != reflect.Slice {
+		return ShouldEqual(actual, expected[0])
 	}
 	actualSlice, err := cast.ToSliceE(actual)
 	if err != nil {
@@ -664,21 +733,25 @@ func ShouldHaveLength(actual interface{}, expected ...interface{}) error {
 		return err
 	}
 
+	var actualLength int
+
 	value := reflect.ValueOf(actual)
 	switch value.Kind() {
 	case reflect.Slice, reflect.Chan, reflect.Map, reflect.String:
+		actualLength = value.Len()
 		if value.Len() == int(length) {
 			return nil
 		}
 	case reflect.Ptr:
 		elem := value.Elem()
 		kind := elem.Kind()
-		if (kind == reflect.Slice || kind == reflect.Array) && elem.Len() == int(length) {
+		actualLength = elem.Len()
+		if (kind == reflect.Slice || kind == reflect.Array) && actualLength == int(length) {
 			return nil
 		}
 	}
 
-	return fmt.Errorf("expected '%v' have length of %d but it wasn't", actual, length)
+	return fmt.Errorf("expected '%v' have length of %d but it wasn't (%d)", actual, length, actualLength)
 
 }
 
@@ -1046,6 +1119,41 @@ func ShouldHappenBetween(actual interface{}, expected ...interface{}) error {
 		return nil
 	}
 	return fmt.Errorf("expected '%v' to be between '%v' and '%v' ", actualTime, min, max)
+}
+
+// ShouldTimeEqual receives exactly 2 time.Time arguments and does a time equality check.
+// The arguments have to respect the date format RFC3339, as 2006-01-02T15:04:00+07:00
+//
+// Example of testsuite file:
+//
+//  name: test ShouldTimeEqual
+//  vars:
+//    time_expected: 2006-01-02T13:04:00Z
+//    time: 2006-01-02T15:04:00+02:00
+//  testcases:
+//  - name: test assertion
+//    steps:
+//    - type: exec
+//      script: "echo {{.time}}"
+//      assertions:
+//        - result.systemout ShouldTimeEqual "{{.time_expected}}"
+func ShouldTimeEqual(actual interface{}, expected ...interface{}) error {
+	if err := need(1, expected); err != nil {
+		return err
+	}
+
+	actualTime, err := getTimeFromString(actual)
+	if err != nil {
+		return err
+	}
+	expectedTime, err := getTimeFromString(expected[0])
+	if err != nil {
+		return err
+	}
+	if actualTime.Equal(expectedTime) {
+		return nil
+	}
+	return fmt.Errorf("expected '%v' to be time equals to '%v' ", actualTime, expectedTime)
 }
 
 func getTimeFromString(in interface{}) (time.Time, error) {

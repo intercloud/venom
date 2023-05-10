@@ -48,7 +48,7 @@ type Executor struct {
 	Exchange string `json:"exchange" yaml:"exchange"`
 	// RoutingKey represents the RabbitMQ routing key
 	ExchangeType string `json:"exchange_type" yaml:"exchangeType"`
-	// ExchangeType respresents the type of exchange (fanout, etc..)
+	// ExchangeType represents the type of exchange (fanout, etc..)
 	RoutingKey string `json:"routing_key" yaml:"routingKey"`
 
 	// Represents the limit of message will be read. After limit, consumer stop read message
@@ -61,12 +61,12 @@ type Executor struct {
 
 // Result represents a step result.
 type Result struct {
-	TimeSeconds float64       `json:"timeSeconds" yaml:"timeSeconds"`
+	TimeSeconds float64       `json:"timeseconds" yaml:"timeSeconds"`
 	Body        []string      `json:"body" yaml:"body"`
 	Messages    []interface{} `json:"messages" yaml:"messages"`
-	BodyJSON    []interface{} `json:"bodyJSON" yaml:"bodyJSON"`
+	BodyJSON    []interface{} `json:"bodyjson" yaml:"bodyJSON"`
 	Headers     []amqp.Table  `json:"headers" yaml:"headers"`
-	Err         string        `json:"error" yaml:"error"`
+	Err         string        `json:"err" yaml:"error"`
 }
 
 // ZeroValueResult return an empty implementation of this executor result
@@ -76,7 +76,7 @@ func (Executor) ZeroValueResult() interface{} {
 
 // GetDefaultAssertions return default assertions for type exec
 func (Executor) GetDefaultAssertions() *venom.StepAssertions {
-	return &venom.StepAssertions{Assertions: []string{"result.error ShouldBeEmpty"}}
+	return &venom.StepAssertions{Assertions: []venom.Assertion{"result.error ShouldBeEmpty"}}
 }
 
 // Run execute TestStep of type exec
@@ -241,7 +241,7 @@ func (e Executor) consumeMessages(ctx context.Context) ([]string, []interface{},
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	venom.Debug(ctx, "Q declated '%s'", q.Name)
+	venom.Debug(ctx, "Q declared '%s'", q.Name)
 
 	// If an exchange if defined
 	if e.Exchange != "" {

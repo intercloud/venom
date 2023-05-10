@@ -78,7 +78,7 @@ $(HOME)/.richstyle.yml:
 
 GO_RICHGO = ${GOPATH}/bin/richgo
 $(GO_RICHGO): $(HOME)/.richstyle.yml
-	go get -u github.com/kyoh86/richgo
+	go install github.com/kyoh86/richgo@latest
 
 EXIT_TESTS := 0
 $(TESTPKGS_RESULTS): $(GOFILES) $(TESTPKGS_C) $(GO_RICHGO)
@@ -87,19 +87,19 @@ $(TESTPKGS_RESULTS): $(GOFILES) $(TESTPKGS_C) $(GO_RICHGO)
 
 GO_COV_MERGE = ${GOPATH}/bin/gocovmerge
 $(GO_COV_MERGE):
-	go get -u github.com/wadey/gocovmerge
+	go install github.com/wadey/gocovmerge@latest
 
 GO_GOJUNIT = ${GOPATH}/bin/go-junit-report
 $(GO_GOJUNIT):
-	go get -u github.com/jstemmer/go-junit-report
+	go install github.com/jstemmer/go-junit-report@latest
 
 GO_COBERTURA = ${GOPATH}/bin/gocover-cobertura
 $(GO_COBERTURA):
-	go get -u github.com/t-yuki/gocover-cobertura
+	go install github.com/t-yuki/gocover-cobertura@latest
 
 GO_XUTOOLS = ${GOPATH}/bin/xutools
 $(GO_XUTOOLS):
-	go get -u github.com/richardlt/xutools
+	go install github.com/richardlt/xutools@latest
 
 mk_go_test: $(GO_COV_MERGE) $(GO_COBERTURA) $(GOFILES) $(TARGET_RESULTS) $(TESTPKGS_RESULTS)# Run tests
 	@echo "Generating unit tests coverage..."
@@ -138,8 +138,8 @@ mk_go_test-xunit: $(GO_GOJUNIT) $(GO_XUTOOLS) $(TARGET_RESULTS) # Generate test 
 	done; \
 	for XML in `find . -name "tests.log.tests-results.xml"`; do \
 		if [ "$$XML" =  "./tests.log.tests-results.xml" ]; then \
-      		PWD=`pwd`; \
-		 	mv $$XML $(TARGET_RESULTS)/`basename $(PWD)`.tests-results.xml; \
+			PWD=`pwd`; \
+			mv $$XML $(TARGET_RESULTS)/`basename $(PWD)`.tests-results.xml; \
 		else \
 			mv $$XML $(TARGET_RESULTS)/`echo $$XML | sed 's|./||' | sed 's|/|_|g' | sed 's|_tests.log||'`; \
 		fi; \
@@ -166,34 +166,41 @@ mk_go_test-xunit: $(GO_GOJUNIT) $(GO_XUTOOLS) $(TARGET_RESULTS) # Generate test 
 TMP_DIR = /tmp/ovh/venom
 
 OSNAME=$(shell go env GOOS)
+LINT_ARCH = $(shell go env GOARCH)
 CUR_PATH = $(notdir $(shell pwd))
 
-GOLANGCI_DIR = $(TMP_DIR)/$(CUR_PATH)/golangci-lint
-GOLANGCI_TMP_BIN = $(GOLANGCI_DIR)/golangci-lint
+LINT_DIR = $(TMP_DIR)/$(CUR_PATH)/golangci-lint
+LINT_BIN = $(LINT_DIR)/golangci-lint
 
-GOLANGCI_LINT_VERSION=1.31.0
-GOLANGCI_CMD = $(GOLANGCI_TMP_BIN) run --allow-parallel-runners -c .golangci.yml
-GOLANGCI_LINT_ARCHIVE = golangci-lint-$(GOLANGCI_LINT_VERSION)-$(OSNAME)-amd64.tar.gz
+LINT_VERSION=1.31.0
+LINT_CMD = $(LINT_BIN) run --allow-parallel-runners -c .golangci.yml --build-tags $(OSNAME)
+LINT_ARCHIVE = golangci-lint-$(LINT_VERSION)-$(OSNAME)-$(LINT_ARCH).tar.gz
+LINT_ARCHIVE_DEST = $(TMP_DIR)/$(LINT_ARCHIVE)
 
 # Run this on localc machine.
 # It downloads a version of golangci-lint and execute it locally.
 # duration first time ~6s
 # duration second time ~2s
 .PHONY: lint
-lint: $(GOLANGCI_TMP_BIN)
-	$(GOLANGCI_DIR)/$(GOLANGCI_CMD)
+lint: $(LINT_BIN)
+	$(LINT_DIR)/$(LINT_CMD)
 
 # install a local golangci-lint if not found.
-$(GOLANGCI_TMP_BIN):
-	curl -OL https://github.com/golangci/golangci-lint/releases/download/v$(GOLANGCI_LINT_VERSION)/$(GOLANGCI_LINT_ARCHIVE)
-	mkdir -p $(GOLANGCI_DIR)/
-	tar -xf $(GOLANGCI_LINT_ARCHIVE) --strip-components=1 -C $(GOLANGCI_DIR)/
-	chmod +x $(GOLANGCI_TMP_BIN)
-	rm -f $(GOLANGCI_LINT_ARCHIVE)
+$(LINT_BIN):
+	curl -L --create-dirs \
+		--retry 6 \
+		--retry-delay 9 \
+		--retry-max-time 60 \
+		https://github.com/golangci/golangci-lint/releases/download/v$(LINT_VERSION)/$(LINT_ARCHIVE) \
+		--output $(LINT_ARCHIVE_DEST)
+	mkdir -p $(LINT_DIR)/
+	tar -xf $(LINT_ARCHIVE_DEST) --strip-components=1 -C $(LINT_DIR)/
+	chmod +x $(LINT_BIN)
+	rm -f $(LINT_ARCHIVE_DEST)
 
 mk_go_lint: $(GOLANG_CI_LINT) # run golangci lint
 	$(info *** running lint)
-	$(GOLANGCI_CMD)
+	$(LINT_CMD)
 
 ##### =====> Internals <===== #####
 

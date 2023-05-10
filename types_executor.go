@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
-	"github.com/ghodss/yaml"
 	"github.com/gosimple/slug"
 	"github.com/ovh/cds/sdk/interpolate"
 	"github.com/pkg/errors"
+	"github.com/rockbears/yaml"
 )
 
 // Executor execute a testStep.
@@ -25,6 +26,7 @@ type ExecutorRunner interface {
 	ExecutorWithSetup
 	Name() string
 	Retry() int
+	RetryIf() []string
 	Delay() int
 	Timeout() int
 	Info() []string
@@ -39,6 +41,7 @@ type executor struct {
 	Executor
 	name    string
 	retry   int      // nb retry a test case if it is in failure.
+	retryIf []string // retry conditions to check before performing any retries
 	delay   int      // delay between two retries
 	timeout int      // timeout on executor
 	info    []string // info to display after the run and before the assertion
@@ -55,6 +58,10 @@ func (e executor) Type() string {
 
 func (e executor) Retry() int {
 	return e.retry
+}
+
+func (e executor) RetryIf() []string {
+	return e.retryIf
 }
 
 func (e executor) Delay() int {
@@ -74,6 +81,9 @@ func (e executor) GetExecutor() Executor {
 }
 
 func (e executor) GetDefaultAssertions() *StepAssertions {
+	if e.Executor == nil {
+		return nil
+	}
 	x, ok := e.Executor.(executorWithDefaultAssertions)
 	if ok {
 		return x.GetDefaultAssertions()
@@ -82,6 +92,9 @@ func (e executor) GetDefaultAssertions() *StepAssertions {
 }
 
 func (e executor) ZeroValueResult() interface{} {
+	if e.Executor == nil {
+		return nil
+	}
 	x, ok := e.Executor.(executorWithZeroValueResult)
 	if ok {
 		return x.ZeroValueResult()
@@ -90,6 +103,9 @@ func (e executor) ZeroValueResult() interface{} {
 }
 
 func (e executor) Setup(ctx context.Context, vars H) (context.Context, error) {
+	if e.Executor == nil {
+		return ctx, nil
+	}
 	x, ok := e.Executor.(ExecutorWithSetup)
 	if ok {
 		return x.Setup(ctx, vars)
@@ -98,6 +114,9 @@ func (e executor) Setup(ctx context.Context, vars H) (context.Context, error) {
 }
 
 func (e executor) TearDown(ctx context.Context) error {
+	if e.Executor == nil {
+		return nil
+	}
 	x, ok := e.Executor.(ExecutorWithSetup)
 	if ok {
 		return x.TearDown(ctx)
@@ -105,11 +124,19 @@ func (e executor) TearDown(ctx context.Context) error {
 	return nil
 }
 
-func newExecutorRunner(e Executor, name, stype string, retry, delay, timeout int, info []string) ExecutorRunner {
+func (e executor) Run(ctx context.Context, step TestStep) (interface{}, error) {
+	if e.Executor == nil {
+		return nil, nil
+	}
+	return e.Executor.Run(ctx, step)
+}
+
+func newExecutorRunner(e Executor, name, stype string, retry int, retryIf []string, delay, timeout int, info []string) ExecutorRunner {
 	return &executor{
 		Executor: e,
 		name:     name,
 		retry:    retry,
+		retryIf:  retryIf,
 		delay:    delay,
 		timeout:  timeout,
 		info:     info,
@@ -173,7 +200,7 @@ func (ux UserExecutor) ZeroValueResult() interface{} {
 	return result
 }
 
-func (v *Venom) RunUserExecutor(ctx context.Context, runner ExecutorRunner, tcIn *TestCase, step TestStep) (interface{}, error) {
+func (v *Venom) RunUserExecutor(ctx context.Context, runner ExecutorRunner, tcIn *TestCase, tsIn *TestStepResult, step TestStep) (interface{}, error) {
 	vrs := tcIn.TestSuiteVars.Clone()
 	uxIn := runner.GetExecutor().(UserExecutor)
 
@@ -193,14 +220,20 @@ func (v *Venom) RunUserExecutor(ctx context.Context, runner ExecutorRunner, tcIn
 	}
 	// reload the user executor with the interpolated vars
 	_, exe, err := v.GetExecutorRunner(ctx, step, vrs)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to reload executor")
+	}
 	ux := exe.GetExecutor().(UserExecutor)
 
 	tc := &TestCase{
-		Name:          ux.Executor,
-		RawTestSteps:  ux.RawTestSteps,
-		Vars:          vrs,
-		TestSuiteVars: tcIn.TestSuiteVars,
-		IsExecutor:    true,
+		TestCaseInput: TestCaseInput{
+			Name:         ux.Executor,
+			RawTestSteps: ux.RawTestSteps,
+			Vars:         vrs,
+		},
+		TestSuiteVars:   tcIn.TestSuiteVars,
+		IsExecutor:      true,
+		TestStepResults: make([]TestStepResult, 0),
 	}
 
 	tc.originalName = tc.Name
@@ -213,7 +246,7 @@ func (v *Venom) RunUserExecutor(ctx context.Context, runner ExecutorRunner, tcIn
 	Debug(ctx, "running user executor %v", tc.Name)
 	Debug(ctx, "with vars: %v", vrs)
 
-	v.runTestSteps(ctx, tc)
+	v.runTestSteps(ctx, tc, tsIn)
 
 	computedVars, err := DumpString(tc.computedVars)
 	if err != nil {
@@ -252,9 +285,7 @@ func (v *Venom) RunUserExecutor(ctx context.Context, runner ExecutorRunner, tcIn
 		return nil, errors.Wrapf(err, "unable to unmarshal")
 	}
 
-	tcIn.Errors = tc.Errors
-	tcIn.Failures = tc.Failures
-	if len(tc.Errors) > 0 || len(tc.Failures) > 0 {
+	if len(tsIn.Errors) > 0 {
 		return outputResult, fmt.Errorf("failed")
 	}
 
@@ -272,15 +303,34 @@ func (v *Venom) RunUserExecutor(ctx context.Context, runner ExecutorRunner, tcIn
 		return nil, errors.Wrapf(err, "unable to compute result")
 	}
 
-	resultS, err := DumpString(outputResult)
-	if err != nil {
-		return nil, errors.Wrapf(err, "unable to compute result")
-	}
-
-	for k, v := range resultS {
-		var outJSON interface{}
-		if err := JSONUnmarshal([]byte(v), &outJSON); err == nil {
-			result[k+"json"] = outJSON
+	for k, v := range result {
+		switch z := v.(type) {
+		case string:
+			var outJSON interface{}
+			if err := JSONUnmarshal([]byte(z), &outJSON); err == nil {
+				result[k+"json"] = outJSON
+				// Now we have to dump this object, but the key will change if this is a array or not
+				if reflect.ValueOf(outJSON).Kind() == reflect.Slice {
+					prefix := k + "json"
+					splitPrefix := strings.Split(prefix, ".")
+					prefix += "." + splitPrefix[len(splitPrefix)-1]
+					outJSONDump, err := Dump(outJSON)
+					if err != nil {
+						return nil, errors.Wrapf(err, "unable to compute result")
+					}
+					for ko, vo := range outJSONDump {
+						result[prefix+ko] = vo
+					}
+				} else {
+					outJSONDump, err := DumpWithPrefix(outJSON, k+"json")
+					if err != nil {
+						return nil, errors.Wrapf(err, "unable to compute result")
+					}
+					for ko, vo := range outJSONDump {
+						result[ko] = vo
+					}
+				}
+			}
 		}
 	}
 	return result, nil

@@ -19,3 +19,11 @@ tests.log
 *.jpg
 ./.venomrc
 test_results.xml
+*.prof
+git-template
+tests/grpc/pki
+tests/pki_variables.yml
+*.log
+*.xml
+test_results*.html
+!venom_output.html

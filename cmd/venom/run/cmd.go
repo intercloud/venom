@@ -4,38 +4,21 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime/pprof"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/ghodss/yaml"
 	"github.com/mitchellh/go-homedir"
+	"github.com/rockbears/yaml"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/ovh/cds/sdk/interpolate"
 	"github.com/ovh/venom"
-	"github.com/ovh/venom/executors/amqp"
-	"github.com/ovh/venom/executors/dbfixtures"
-	"github.com/ovh/venom/executors/exec"
-	"github.com/ovh/venom/executors/grpc"
-	"github.com/ovh/venom/executors/http"
-	"github.com/ovh/venom/executors/imap"
-	"github.com/ovh/venom/executors/kafka"
-	"github.com/ovh/venom/executors/mqtt"
-	"github.com/ovh/venom/executors/ovhapi"
-	"github.com/ovh/venom/executors/rabbitmq"
-	"github.com/ovh/venom/executors/readfile"
-	"github.com/ovh/venom/executors/redis"
-	"github.com/ovh/venom/executors/smtp"
-	"github.com/ovh/venom/executors/sql"
-	"github.com/ovh/venom/executors/ssh"
-	"github.com/ovh/venom/executors/tavern"
-	"github.com/ovh/venom/executors/web"
+	"github.com/ovh/venom/executors"
 )
 
 var (
@@ -43,12 +26,13 @@ var (
 	v    *venom.Venom
 
 	variables     []string
-	format        string
+	format        string = "xml" // Set the default value for formatFlag
 	varFiles      []string
 	outputDir     string
 	libDir        string
+	htmlReport    bool
 	stopOnFailure bool
-	verbose       int
+	verbose       int = 0 // Set the default value for verboseFlag
 
 	variablesFlag     *[]string
 	formatFlag        *string
@@ -56,14 +40,16 @@ var (
 	outputDirFlag     *string
 	libDirFlag        *string
 	stopOnFailureFlag *bool
+	htmlReportFlag    *bool
 	verboseFlag       *int
 )
 
 func init() {
-	formatFlag = Cmd.Flags().String("format", "xml", "--format:yaml, json, xml, tap")
+	formatFlag = Cmd.Flags().String("format", "xml", "--format:json, tap, xml, yaml")
 	stopOnFailureFlag = Cmd.Flags().Bool("stop-on-failure", false, "Stop running Test Suite on first Test Case failure")
+	htmlReportFlag = Cmd.Flags().Bool("html-report", false, "Generate HTML Report")
 	verboseFlag = Cmd.Flags().CountP("verbose", "v", "verbose. -vv to very verbose and -vvv to very verbose with CPU Profiling")
-	varFilesFlag = Cmd.Flags().StringSlice("var-from-file", []string{""}, "--var-from-file filename.yaml --var-from-file filename2.yaml: yaml, must contains a dictionnary")
+	varFilesFlag = Cmd.Flags().StringSlice("var-from-file", []string{""}, "--var-from-file filename.yaml --var-from-file filename2.yaml: yaml, must contains a dictionary")
 	variablesFlag = Cmd.Flags().StringArray("var", nil, "--var cds='cds -f config.json' --var cds2='cds -f config.json'")
 	outputDirFlag = Cmd.PersistentFlags().String("output-dir", "", "Output Directory: create tests results file inside this directory")
 	libDirFlag = Cmd.PersistentFlags().String("lib-dir", "", "Lib Directory: can contain user executors. example:/etc/venom/lib:$HOME/venom.d/lib")
@@ -74,29 +60,33 @@ func initArgs(cmd *cobra.Command) {
 	// Configuration file overrides the environment variables.
 	if _, err := initFromEnv(os.Environ()); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(2)
+		venom.OSExit(2)
 	}
 
 	if err := initFromConfigFile(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(2)
+		venom.OSExit(2)
 	}
 	cmd.LocalFlags().VisitAll(initFromCommandArguments)
 }
 
 func initFromCommandArguments(f *pflag.Flag) {
-	if f.Name == "format" && formatFlag != nil {
-		format = *formatFlag
-	}
-
 	if !f.Changed {
 		return
 	}
 
 	switch f.Name {
+	case "format":
+		if formatFlag != nil {
+			format = *formatFlag
+		}
 	case "stop-on-failure":
 		if stopOnFailureFlag != nil {
 			stopOnFailure = *stopOnFailureFlag
+		}
+	case "html-report":
+		if htmlReportFlag != nil {
+			htmlReport = *htmlReportFlag
 		}
 	case "output-dir":
 		if outputDirFlag != nil {
@@ -165,6 +155,7 @@ type ConfigFileData struct {
 	LibDir         *string   `json:"lib_dir,omitempty" yaml:"lib_dir,omitempty"`
 	OutputDir      *string   `json:"output_dir,omitempty" yaml:"output_dir,omitempty"`
 	StopOnFailure  *bool     `json:"stop_on_failure,omitempty" yaml:"stop_on_failure,omitempty"`
+	HtmlReport     *bool     `json:"html_report,omitempty" yaml:"html_report,omitempty"`
 	Variables      *[]string `json:"variables,omitempty" yaml:"variables,omitempty"`
 	VariablesFiles *[]string `json:"variables_files,omitempty" yaml:"variables_files,omitempty"`
 	Verbosity      *int      `json:"verbosity,omitempty" yaml:"verbosity,omitempty"`
@@ -172,7 +163,7 @@ type ConfigFileData struct {
 
 // Configuration file overrides the environment variables.
 func initFromReaderConfigFile(reader io.Reader) error {
-	btes, err := ioutil.ReadAll(reader)
+	btes, err := io.ReadAll(reader)
 	if err != nil {
 		return err
 	}
@@ -193,6 +184,9 @@ func initFromReaderConfigFile(reader io.Reader) error {
 	}
 	if configFileData.StopOnFailure != nil {
 		stopOnFailure = *configFileData.StopOnFailure
+	}
+	if configFileData.HtmlReport != nil {
+		htmlReport = *configFileData.HtmlReport
 	}
 	if configFileData.Variables != nil {
 		for _, varFromFile := range *configFileData.Variables {
@@ -257,6 +251,13 @@ func initFromEnv(environ []string) ([]string, error) {
 			return nil, fmt.Errorf("invalid value for VENOM_STOP_ON_FAILURE")
 		}
 	}
+	if os.Getenv("VENOM_HTML_REPORT") != "" {
+		var err error
+		htmlReport, err = strconv.ParseBool(os.Getenv("VENOM_HTML_REPORT"))
+		if err != nil {
+			return nil, fmt.Errorf("invalid value for VENOM_HTML_REPORT")
+		}
+	}
 	if os.Getenv("VENOM_LIB_DIR") != "" {
 		libDir = os.Getenv("VENOM_LIB_DIR")
 	}
@@ -294,6 +295,7 @@ func displayArg(ctx context.Context) {
 	venom.Debug(ctx, "option libDir=%v", libDir)
 	venom.Debug(ctx, "option outputDir=%v", outputDir)
 	venom.Debug(ctx, "option stopOnFailure=%v", stopOnFailure)
+	venom.Debug(ctx, "option htmlReport=%v", htmlReport)
 	venom.Debug(ctx, "option variables=%v", strings.Join(variables, " "))
 	venom.Debug(ctx, "option varFiles=%v", strings.Join(varFiles, " "))
 	venom.Debug(ctx, "option verbose=%v", verbose)
@@ -303,10 +305,18 @@ func displayArg(ctx context.Context) {
 var Cmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run Tests",
-	Long: `
-$ venom run *.yml
-
-Notice that variables initialized with -var-from-file argument can be overrided with -var argument.`,
+	Example: `  Run all testsuites containing in files ending with *.yml or *.yaml: venom run
+  Run a single testsuite: venom run mytestfile.yml
+  Run a single testsuite and export the result in JSON format in test/ folder: venom run mytestfile.yml --format=json --output-dir=test
+  Run a single testsuite and export the result in XML and HTML formats in test/ folder: venom run mytestfile.yml --format=xml --output-dir=test --html-report
+  Run a single testsuite and specify a variable: venom run mytestfile.yml --var="foo=bar"
+  Run a single testsuite and load all variables from a file: venom run mytestfile.yml --var-from-file variables.yaml
+  Run all testsuites containing in files ending with *.yml or *.yaml with verbosity: VENOM_VERBOSE=2 venom run
+  
+  Notice that variables initialized with -var-from-file argument can be overrided with -var argument
+  
+  More info: https://github.com/ovh/venom`,
+	Long: `run integration tests`,
 	PreRun: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
 			path = append(path, ".")
@@ -315,23 +325,9 @@ Notice that variables initialized with -var-from-file argument can be overrided 
 		}
 
 		v = venom.New()
-		v.RegisterExecutorBuiltin(amqp.Name, amqp.New())
-		v.RegisterExecutorBuiltin(dbfixtures.Name, dbfixtures.New())
-		v.RegisterExecutorBuiltin(exec.Name, exec.New())
-		v.RegisterExecutorBuiltin(grpc.Name, grpc.New())
-		v.RegisterExecutorBuiltin(http.Name, http.New())
-		v.RegisterExecutorBuiltin(imap.Name, imap.New())
-		v.RegisterExecutorBuiltin(kafka.Name, kafka.New())
-		v.RegisterExecutorBuiltin(mqtt.Name, mqtt.New())
-		v.RegisterExecutorBuiltin(ovhapi.Name, ovhapi.New())
-		v.RegisterExecutorBuiltin(rabbitmq.Name, rabbitmq.New())
-		v.RegisterExecutorBuiltin(readfile.Name, readfile.New())
-		v.RegisterExecutorBuiltin(redis.Name, redis.New())
-		v.RegisterExecutorBuiltin(smtp.Name, smtp.New())
-		v.RegisterExecutorBuiltin(sql.Name, sql.New())
-		v.RegisterExecutorBuiltin(ssh.Name, ssh.New())
-		v.RegisterExecutorBuiltin(web.Name, web.New())
-		v.RegisterExecutorBuiltin(tavern.Name, tavern.New())
+		for name, executorFunc := range executors.Registry {
+			v.RegisterExecutorBuiltin(name, executorFunc())
+		}
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		initArgs(cmd)
@@ -340,12 +336,12 @@ Notice that variables initialized with -var-from-file argument can be overrided 
 		v.LibDir = libDir
 		v.OutputFormat = format
 		v.StopOnFailure = stopOnFailure
+		v.HtmlReport = htmlReport
 		v.Verbose = verbose
 
 		if err := v.InitLogger(); err != nil {
 			fmt.Fprintf(os.Stderr, "%v\n", err)
-			os.Exit(2)
-			return err
+			venom.OSExit(2)
 		}
 
 		if v.Verbose == 3 {
@@ -383,34 +379,32 @@ Notice that variables initialized with -var-from-file argument can be overrided 
 
 		mapvars, err := readInitialVariables(context.Background(), variables, readers, os.Environ())
 		if err != nil {
-			return err
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			venom.OSExit(2)
 		}
 		v.AddVariables(mapvars)
 
-		start := time.Now()
-
 		if err := v.Parse(context.Background(), path); err != nil {
 			fmt.Fprintf(os.Stderr, "%v\n", err)
-			os.Exit(2)
-			return err
+			venom.OSExit(2)
 		}
 
-		tests, err := v.Process(context.Background(), path)
-		if err != nil {
+		if err := v.Process(context.Background(), path); err != nil {
 			fmt.Fprintf(os.Stderr, "%v\n", err)
-			os.Exit(2)
-			return err
+			venom.OSExit(2)
 		}
 
-		elapsed := time.Since(start)
-		if err := v.OutputResult(*tests, elapsed); err != nil {
+		if err := v.OutputResult(); err != nil {
 			fmt.Fprintf(os.Stderr, "%v\n", err)
-			os.Exit(2)
-			return err
+			venom.OSExit(2)
 		}
-		if tests.TotalKO > 0 {
-			os.Exit(2)
+
+		if v.Tests.Status == venom.StatusPass {
+			fmt.Fprintf(os.Stdout, "final status: %v\n", venom.Green(v.Tests.Status))
+			venom.OSExit(0)
 		}
+		fmt.Fprintf(os.Stdout, "final status: %v\n", venom.Red(v.Tests.Status))
+		venom.OSExit(2)
 
 		return nil
 	},
@@ -427,13 +421,20 @@ func readInitialVariables(ctx context.Context, argsVars []string, argVarsFiles [
 
 	for _, r := range argVarsFiles {
 		var tmpResult = map[string]interface{}{}
-		btes, err := ioutil.ReadAll(r)
+		btes, err := io.ReadAll(r)
 		if err != nil {
 			return nil, err
 		}
-		if err := yaml.Unmarshal(btes, &tmpResult); err != nil {
+
+		stemp, err := interpolate.Do(string(btes), nil)
+		if err != nil {
+			return nil, fmt.Errorf("unable to interpolate file %v", err)
+		}
+
+		if err := yaml.Unmarshal([]byte(stemp), &tmpResult); err != nil {
 			return nil, err
 		}
+
 		for k, v := range tmpResult {
 			result[k] = v
 			venom.Debug(ctx, "Adding variable from vars-files %s=%s", k, v)
@@ -448,7 +449,11 @@ func readInitialVariables(ctx context.Context, argsVars []string, argVarsFiles [
 		if len(tuple) < 2 {
 			return nil, fmt.Errorf("invalid variable declaration: %v", arg)
 		}
-		result[tuple[0]] = cast(tuple[1])
+		stemp, err := interpolate.Do(tuple[1], nil)
+		if err != nil {
+			return nil, fmt.Errorf("unable to interpolate arg %s: %v", arg, err)
+		}
+		result[tuple[0]] = cast(stemp)
 		venom.Debug(ctx, "Adding variable from vars arg %s=%s", tuple[0], result[tuple[0]])
 	}
 

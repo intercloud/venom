@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,8 +35,8 @@ type Executor struct {
 type Result struct {
 	Content     string            `json:"content,omitempty" yaml:"content,omitempty"`
 	ContentJSON interface{}       `json:"contentjson,omitempty" yaml:"contentjson,omitempty"`
-	Err         string            `json:"error" yaml:"error"`
-	TimeSeconds float64           `json:"timeSeconds,omitempty" yaml:"timeSeconds,omitempty"`
+	Err         string            `json:"err" yaml:"error"`
+	TimeSeconds float64           `json:"timeseconds,omitempty" yaml:"timeSeconds,omitempty"`
 	Md5sum      map[string]string `json:"md5sum,omitempty" yaml:"md5sum,omitempty"`
 	Size        map[string]int64  `json:"size,omitempty" yaml:"size,omitempty"`
 	ModTime     map[string]int64  `json:"modtime,omitempty" yaml:"modtime,omitempty"`
@@ -57,7 +56,7 @@ func (Executor) ZeroValueResult() interface{} {
 
 // GetDefaultAssertions return default assertions for type exec
 func (Executor) GetDefaultAssertions() *venom.StepAssertions {
-	return &venom.StepAssertions{Assertions: []string{"result.err ShouldBeEmpty"}}
+	return &venom.StepAssertions{Assertions: []venom.Assertion{"result.err ShouldBeEmpty"}}
 }
 
 // Run execute TestStep of type exec
@@ -88,7 +87,10 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 func (e *Executor) readfile(workdir string) (Result, error) {
 	result := Result{}
 
-	absPath := filepath.Join(workdir, e.Path)
+	absPath := e.Path
+	if !filepath.IsAbs(absPath) {
+		absPath = filepath.Join(workdir, e.Path)
+	}
 
 	fileInfo, _ := os.Stat(absPath) // nolint
 	if fileInfo != nil && fileInfo.IsDir() {
@@ -111,9 +113,9 @@ func (e *Executor) readfile(workdir string) (Result, error) {
 	mod := make(map[string]string)
 
 	for _, f := range filesPath {
-		f, erro := os.Open(f)
-		if erro != nil {
-			return result, fmt.Errorf("Error while opening file: %s", erro)
+		f, error := os.Open(f)
+		if error != nil {
+			return result, fmt.Errorf("Error while opening file: %s", error)
 		}
 		defer f.Close()
 
@@ -125,7 +127,7 @@ func (e *Executor) readfile(workdir string) (Result, error) {
 		h := md5.New()
 		tee := io.TeeReader(f, h)
 
-		b, errr := ioutil.ReadAll(tee)
+		b, errr := io.ReadAll(tee)
 		if errr != nil {
 			return result, fmt.Errorf("Error while reading file: %s", errr)
 		}

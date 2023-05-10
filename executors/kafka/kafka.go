@@ -2,9 +2,9 @@ package kafka
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -59,6 +59,9 @@ type (
 		User               string `json:"user,omitempty" yaml:"user,omitempty"`
 		Password           string `json:"password,omitempty" yaml:"password,omitempty"`
 
+		// TLS Config
+		InsecureTLS bool `json:"insecure_tls,omitempty" yaml:"insecure_tls,omitempty"`
+
 		// ClientType must be "consumer" or "producer"
 		ClientType string `json:"client_type,omitempty" yaml:"clientType,omitempty"`
 
@@ -97,10 +100,10 @@ type (
 
 	// Result represents a step result.
 	Result struct {
-		TimeSeconds  float64       `json:"timeSeconds,omitempty" yaml:"timeSeconds,omitempty"`
+		TimeSeconds  float64       `json:"timeseconds,omitempty" yaml:"timeSeconds,omitempty"`
 		Messages     []Message     `json:"messages,omitempty" yaml:"messages,omitempty"`
-		MessagesJSON []interface{} `json:"messagesJSON,omitempty" yaml:"messagesJSON,omitempty"`
-		Err          string        `json:"error" yaml:"error"`
+		MessagesJSON []interface{} `json:"messagesjson,omitempty" yaml:"messagesJSON,omitempty"`
+		Err          string        `json:"err" yaml:"error"`
 	}
 	consumeFunc = func(message *sarama.ConsumerMessage) (Message, interface{}, error)
 )
@@ -112,7 +115,7 @@ func (Executor) ZeroValueResult() interface{} {
 
 // GetDefaultAssertions return default assertions for type exec
 func (Executor) GetDefaultAssertions() *venom.StepAssertions {
-	return &venom.StepAssertions{Assertions: []string{"result.err ShouldBeEmpty"}}
+	return &venom.StepAssertions{Assertions: []venom.Assertion{"result.err ShouldBeEmpty"}}
 }
 
 // Run execute TestStep of type exec
@@ -187,7 +190,7 @@ func (e Executor) produceMessages(workdir string) error {
 	if e.MessagesFile != "" {
 		path := filepath.Join(workdir, e.MessagesFile)
 		if _, err = os.Stat(path); err == nil {
-			content, err := ioutil.ReadFile(path)
+			content, err := os.ReadFile(path)
 			if err != nil {
 				return err
 			}
@@ -228,27 +231,40 @@ func (e Executor) getMessageValue(m *Message, workdir string) ([]byte, error) {
 		return value, nil
 	}
 	// This is test with Avro
-	// 1. Read schema from file
+	var (
+		schemaID int
+		schema   string
+	)
+	// 1. Get schema with its ID
+	// 1.1 Try with the file, if provided
+	subject := fmt.Sprintf("%s-value", m.Topic) // Using topic name strategy
 	schemaFile := strings.Trim(m.AvroSchemaFile, " ")
-	if len(schemaFile) == 0 {
-		return nil, fmt.Errorf("no AVRO schema file specified")
+	if len(schemaFile) != 0 {
+		schemaPath := path.Join(workdir, schemaFile)
+		schemaBlob, err := os.ReadFile(schemaPath)
+		if err != nil {
+			return nil, fmt.Errorf("can't read from %s: %w", schemaPath, err)
+		}
+		schema = string(schemaBlob)
+		// 1.2 Push schema to Schema Registry
+		schemaID, err = e.schemaReg.RegisterNewSchema(subject, schema)
+		if err != nil {
+			return nil, fmt.Errorf("can't register new schame in SchemaRegistry: %s", err)
+		}
+	} else {
+		// 1.3 Get schema from Schema Registry
+		schemaID, schema, err = e.schemaReg.GetLatestSchema(subject)
+		if err != nil {
+			return nil, fmt.Errorf("can't get latest schema for subject %s-value: %w", m.Topic, err)
+		}
 	}
-	shemaPath := path.Join(workdir, m.AvroSchemaFile)
-	schema, err := ioutil.ReadFile(shemaPath)
-	if err != nil {
-		return nil, fmt.Errorf("can't read from %s: %w", shemaPath, err)
-	}
+
 	// 2. Encode Value with schema
 	avroMsg, err := Convert2Avro(value, string(schema))
 	if err != nil {
 		return nil, fmt.Errorf("can't convert value 2 avro with schema: %w", err)
 	}
-	// 3. Push schema 2 Schema Registry
-	schemaID, err := e.schemaReg.RegisterNewSchema(fmt.Sprintf("%s-value", m.Topic), string(schema))
-	if err != nil {
-		return nil, fmt.Errorf("can't register new schame in SchemaRegistry: %s", err)
-	}
-	// 4. Create Kafka message with majic byte and schema ID
+	// 3. Create Kafka message with magic byte and schema ID
 	encodedAvroMsg, err := CreateMessage(avroMsg, schemaID)
 	if err != nil {
 		return nil, fmt.Errorf("can't encode avro message with schemaID: %s", err)
@@ -264,7 +280,7 @@ func (e Executor) getRAWMessageValue(m *Message, workdir string) ([]byte, error)
 	}
 	// Read from file
 	s := path.Join(workdir, m.ValueFile)
-	value, err := ioutil.ReadFile(s)
+	value, err := os.ReadFile(s)
 	if err != nil {
 		return nil, fmt.Errorf("can't read from %s: %w", s, err)
 	}
@@ -286,7 +302,7 @@ func (e Executor) consumeMessages(ctx context.Context) ([]Message, []interface{}
 
 	consumerGroup, err := sarama.NewConsumerGroup(e.Addrs, e.GroupID, config)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error instanciate consumer err: %w", err)
+		return nil, nil, fmt.Errorf("error instantiate consumer err: %w", err)
 	}
 	defer func() { _ = consumerGroup.Close() }()
 
@@ -316,12 +332,30 @@ func (e Executor) consumeMessages(ctx context.Context) ([]Message, []interface{}
 		messageLimit: e.MessageLimit,
 		schemaReg:    e.schemaReg,
 		keyFilter:    e.KeyFilter,
+		done:         make(chan struct{}),
 	}
-	if err := consumerGroup.Consume(ctx, e.Topics, h); err != nil {
-		if e.WaitFor > 0 && errors.Is(err, context.DeadlineExceeded) {
-			venom.Info(ctx, "wait ended")
-		} else {
-			venom.Error(ctx, "error on consume:%s", err)
+
+	cherr := make(chan error)
+	go func() {
+		cherr <- consumerGroup.Consume(ctx, e.Topics, h)
+	}()
+
+	select {
+	case err := <-cherr:
+		if err != nil {
+			if e.WaitFor > 0 && errors.Is(err, context.DeadlineExceeded) {
+				venom.Info(ctx, "wait ended")
+			} else {
+				return nil, nil, fmt.Errorf("error on consume: %w", err)
+			}
+		}
+	case <-ctx.Done():
+		if ctx.Err() != nil {
+			if e.WaitFor > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				venom.Info(ctx, "wait ended")
+			} else {
+				return nil, nil, fmt.Errorf("kafka consumed failed: %w", ctx.Err())
+			}
 		}
 	}
 
@@ -331,12 +365,15 @@ func (e Executor) consumeMessages(ctx context.Context) ([]Message, []interface{}
 func (e Executor) getKafkaConfig() (*sarama.Config, error) {
 	config := sarama.NewConfig()
 	config.Net.TLS.Enable = e.WithTLS
+	config.Net.TLS.Config = &tls.Config{
+		InsecureSkipVerify: e.InsecureTLS,
+	}
 	config.Net.SASL.Enable = e.WithSASL
 	config.Net.SASL.User = e.User
 	config.Net.SASL.Password = e.Password
 	config.Consumer.Return.Errors = true
 	config.Net.DialTimeout = defaultDialTimeout
-	config.Version = sarama.V0_10_2_0
+	config.Version = sarama.V2_6_0_0
 
 	if e.KafkaVersion != "" {
 		kafkaVersion, err := sarama.ParseKafkaVersion(e.KafkaVersion)
@@ -359,6 +396,8 @@ type handler struct {
 	schemaReg    SchemaRegistry
 	keyFilter    string
 	mutex        sync.Mutex
+	done         chan struct{}
+	once         sync.Once
 }
 
 // Setup is run at the beginning of a new session, before ConsumeClaim
@@ -374,7 +413,14 @@ func (h *handler) Cleanup(sarama.ConsumerGroupSession) error {
 // ConsumeClaim must start a consumer loop of ConsumerGroupClaim's Messages().
 func (h *handler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	ctx := session.Context()
+
 	for message := range claim.Messages() {
+		// Stop consuming if one of the other handler goroutines already hit the message limit
+		select {
+		case <-h.done:
+			return nil
+		default:
+		}
 		consumeFunction := h.consumeJSON
 		if h.withAVRO {
 			consumeFunction = h.consumeAVRO
@@ -388,23 +434,43 @@ func (h *handler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama
 			venom.Info(ctx, "ignore message with key: %s", msg.Key)
 			continue
 		}
+
 		h.mutex.Lock()
+		// Check if message limit is hit *before* adding new message
+		messagesLen := len(h.messages)
+		if h.messageLimit > 0 && messagesLen >= h.messageLimit {
+			h.mutex.Unlock()
+			h.messageLimitReached(ctx)
+			return nil
+		}
+
 		h.messages = append(h.messages, msg)
 		h.messagesJSON = append(h.messagesJSON, msgJSON)
-		messagesLen := len(h.messages)
 		h.mutex.Unlock()
+		messagesLen++
 
 		if h.markOffset {
 			session.MarkMessage(message, "")
 		}
+
+		session.MarkMessage(message, "delivered")
+
+		// Check if the message limit is hit
 		if h.messageLimit > 0 && messagesLen >= h.messageLimit {
-			venom.Info(ctx, "message limit reached")
+			h.messageLimitReached(ctx)
 			return nil
 		}
-		session.MarkMessage(message, "delivered")
 	}
 
 	return nil
+}
+
+func (h *handler) messageLimitReached(ctx context.Context) {
+	venom.Info(ctx, "message limit reached")
+	// Signal to other handler goroutines that they should stop consuming messages.
+	// Only checking the message length isn't enough in case of filtering by key and never reaching the check.
+	// Using sync.Once to prevent panics from multiple channel closings.
+	h.once.Do(func() { close(h.done) })
 }
 
 func (h *handler) consumeJSON(message *sarama.ConsumerMessage) (Message, interface{}, error) {

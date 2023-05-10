@@ -1,3 +1,8 @@
+PKI_DIR := ./grpc/pki
+PKI_VAR_FILE = ./pki_variables.yml
+
+include ./pki.mk
+
 define docker_run
 	docker run --name venom-$(2) -d $(3) $(1) > venom-$2.cid
 endef
@@ -11,10 +16,12 @@ venom-postgres.cid:
 	$(call docker_run,postgres,postgres,-p 15432:5432 -e POSTGRES_PASSWORD=venom -e POSTGRES_USER=venom -e POSTGRES_DB=venom)
 venom-mysql.cid:
 	$(call docker_run,mysql/mysql-server,mysql,-p 13306:3306 -e MYSQL_PASSWORD=venom -e MYSQL_USER=venom -e MYSQL_DATABASE=venom)
+venom-mongo.cid:
+	$(call docker_run,mongo,mongo,-p 27017:27017 -e MONGO_INITDB_ROOT_PASSWORD=venom -e MONGO_INITDB_ROOT_USERNAME=venom -e MONGO_INITDB_DATABASE=venom)
 venom-redis.cid:
 	$(call docker_run,redis,redis,-p 16379:6379)
 venom-imap.cid:
-	$(call docker_run,antespi/docker-imap-devel,imap,-p 1025:25 -p 1143:143 -p 1993:993 -e MAILNAME=example.org -e MAIL_ADDRESS=address@example.org -e MAIL_PASS=pass)
+	$(call docker_run,tomadele/mail-server,imap,-p 1025:25 -p 1143:143 -p 1993:993 -e MAILNAME=example.org -e MAIL_ADDRESS=address@example.org -e MAIL_PASS=pass)
 venom-kafka.cid:
 	docker network create --driver bridge $(docker-network)
 	$(call docker_run,confluentinc/cp-zookeeper:6.0.0,kafka-zookeeper,\
@@ -37,14 +44,28 @@ venom-kafka.cid:
 venom-rabbit.cid:
 	$(call docker_run,rabbitmq,rabbitmq,-p 5672:5672 -p 15672:15672)
 venom-sshd.cid:
-	$(call docker_run,ghcr.io/linuxserver/openssh-server,sshd,-p 2222:2222 -e PUID=1000 -e PGID=1000 -e TZ=Europe/London -e PUBLIC_KEY="$(shell cat ~/.ssh/id_rsa.pub)" -e USER_NAME=venom )
+	$(call docker_run,ghcr.io/linuxserver/openssh-server,sshd,-p 2222:2222 -e PUID=1000 -e PGID=1000 -e TZ=Europe/London -e PUBLIC_KEY="$(shell cat ~/.ssh/id_rsa.pub)" -e USER_NAME=venom -e PASSWORD_ACCESS=true -e USER_PASSWORD=testvenom -e SUDO_ACCESS=true)
 venom-mqtt.cid:
 	$(call docker_run,eclipse-mosquitto,mqtt-broker,-p 1883:1883 -p 9001:9001 -v $(shell realpath mqtt/mosquitto.conf):/mosquitto/config/mosquitto.conf:ro)
 venom-qpid.cid:
 	$(call docker_run,scholzj/qpid-cpp:1.39.0,qpid,-p 5673:5672)
 	docker exec venom-qpid qpid-config add queue amqp-test
-  
-start-test-stack: venom-postgres.cid venom-mysql.cid venom-redis.cid venom-imap.cid venom-kafka.cid venom-rabbit.cid venom-sshd.cid venom-mqtt.cid venom-qpid.cid
+venom-grpc.cid:
+	docker build -t venom-grpc-greeter ./grpc
+	$(call docker_run,venom-grpc-greeter,grpc,-p 50051:50051)
+
+start-test-stack: venom-postgres.cid
+start-test-stack: venom-mysql.cid
+start-test-stack: venom-mongo.cid
+start-test-stack: venom-redis.cid
+start-test-stack: venom-imap.cid
+start-test-stack: venom-kafka.cid
+start-test-stack: venom-rabbit.cid
+start-test-stack: venom-sshd.cid
+start-test-stack: venom-mqtt.cid
+start-test-stack: venom-qpid.cid
+start-test-stack: $(PKI_DIR)
+start-test-stack: venom-grpc.cid
 
 stop-test-stack:
 	@for f in `ls -1 *.cid`; do docker stop `cat $${f}`; docker rm `cat $${f}`; done; rm -f *.cid; docker network rm $(docker-network)
@@ -52,13 +73,14 @@ stop-test-stack:
 build-test-binary:
 	cd ../cmd/venom; \
 	TEMP=`$(PKGS_COMMA_SEP)`; \
-	CGO_ENABLED=1 go test -coverpkg $$TEMP -c . -o ../../tests/venom.test -tags testbincover;
+	CGO_ENABLED=1 go test -coverpkg $$TEMP -c . -o ../../tests/venom.test -ldflags "-X github.com/ovh/venom.IsTest=true" -tags testbincover;
 
 build-test-binary-docker:
-	docker run -v `pwd`/..:/workspace golang:1.16 sh -c "cd /workspace/tests && make build-test-binary"	
+	docker run -v `pwd`/..:/workspace golang:1.19 sh -c "cd /workspace/tests && make build-test-binary"	
 
-run-test: 
-	VENOM_VAR_MY_ENVAR=foo ./venom_wrapper.sh run -vv --format=xml --output-dir=. --lib-dir=./lib_custom --var='array_from_var=["biz","buz"]' --var-from-file ./kafka/testVariables.yml  --var-from-file ./vars/vars.yml ./*.yml ./assertions/*.yml && \
+run-test: generate-venom-pki
+	VENOM_VAR_MY_ENVAR=foo  ./venom_wrapper.sh run \
+	-vv --format=xml --output-dir=. --html-report --lib-dir=./lib_custom --var='array_from_var=["biz","buz"]' --var-from-file ./kafka/testVariables.yml --var-from-file=$(PKI_VAR_FILE) --var-from-file ./vars/vars.yml ./*.yml ./assertions/*.yml && \
 	(cd ./vars_override && VENOM_VAR_foo=from-env VENOM_VAR_FOO2=from-env2 VENOM_VAR_FOO3=from-env3 ../venom_wrapper.sh run -vv --format=xml --output-dir=. --var foo='from-cmd-arg' --var='array_from_var=["biz","buz"]' ./mytc.yml);
 
 .PHONY: wait-for-kafka
@@ -68,11 +90,11 @@ wait-for-kafka:
 	echo "\n\033[0;32mdone\033[0m"
 
 clean:
-	@rm -f *.prof *.log *.dump.json *.args.file *.error.out *.out *.test.out *.coverprofile
+	@rm -f *.prof *.html *.xml *.log *.dump.json *.args.file *.error.out *.out *.test.out *.coverprofile
 
 merge-coverage:
-	@docker run -v `pwd`:/workspace golang:1.16 sh -c "\
-			go get -u github.com/wadey/gocovmerge && \
+	@docker run -v `pwd`:/workspace golang:1.19 sh -c "\
+			go install github.com/wadey/gocovmerge@latest && \
 			cd /workspace && \
-      gocovmerge $(COVER_FILES) > /workspace/venom.cover.out \
+    gocovmerge $(COVER_FILES) > /workspace/venom.cover.out \
 		"

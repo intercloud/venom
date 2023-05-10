@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path"
 
 	fixtures "github.com/go-testfixtures/testfixtures/v3"
@@ -15,6 +15,7 @@ import (
 	// SQL drivers.
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/ovh/venom"
 )
@@ -73,7 +74,7 @@ func (e Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, er
 		for _, s := range e.Schemas {
 			venom.Debug(ctx, "loading schema from file %s\n", s)
 			s = path.Join(workdir, s)
-			sbytes, errs := ioutil.ReadFile(s)
+			sbytes, errs := os.ReadFile(s)
 			if errs != nil {
 				return nil, errs
 			}
@@ -115,7 +116,7 @@ func (Executor) ZeroValueResult() interface{} {
 
 // GetDefaultAssertions return the default assertions of the executor.
 func (e Executor) GetDefaultAssertions() venom.StepAssertions {
-	return venom.StepAssertions{Assertions: []string{}}
+	return venom.StepAssertions{Assertions: []venom.Assertion{}}
 }
 
 // loadFixtures loads the fixtures in the database.
@@ -182,6 +183,8 @@ func getDialect(name string, skipResetSequences bool) func(*fixtures.Loader) err
 		}
 	case "mysql":
 		return fixtures.Dialect("mysql")
+	case "sqlite3":
+		return fixtures.Dialect("sqlite3")
 	}
 	return nil
 }

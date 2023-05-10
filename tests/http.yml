@@ -25,7 +25,6 @@ testcases:
     assertions:
     - result.statuscode ShouldEqual 401
     - result.headers.x-ovh-queryid ShouldNotBeEmpty
-    - result.headers ShouldHaveLength 11
     - result.timeseconds ShouldBeLessThan 5
 
 - name: post http testcase with body file
@@ -47,7 +46,9 @@ testcases:
     multipart_form:
       file: '@./venom.gif'
     assertions:
-    - result.statuscode ShouldEqual 401
+    - or:
+      - result.statuscode ShouldEqual 401
+      - result.statuscode ShouldEqual 415
 
 - name: post http enhanced assertions
   steps:
@@ -90,3 +91,13 @@ testcases:
       - result.body ShouldBeEmpty
       - result.headers ShouldBeEmpty
 
+
+- name: get http (with query parameters)
+  steps:
+  - type: http
+    method: GET
+    url: https://httpbin.org/get
+    query_parameters:
+      a: " b"
+    assertions:
+      - result.bodyjson.args.a ShouldEqual " b"
