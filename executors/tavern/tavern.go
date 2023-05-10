@@ -101,7 +101,7 @@ func (Executor) ZeroValueResult() interface{} {
 
 // GetDefaultAssertions return default assertions for this executor
 func (Executor) GetDefaultAssertions() *venom.StepAssertions {
-	return &venom.StepAssertions{Assertions: []string{"result AssertResponse"}}
+	return &venom.StepAssertions{Assertions: []venom.Assertion{"result AssertResponse"}}
 }
 
 // Run execute TestStep
