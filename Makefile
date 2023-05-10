@@ -45,7 +45,7 @@ $(ALL_RESULTS_TARGETS):
 
 .PHONY: build lint clean testrun test dist test-xunit package
 
-build: ## build all components and push them into dist directory
+build: clean ## build all components and push them into dist directory
 	$(info Building Component venom)
 	$(MAKE) build -C cmd/venom
 	$(MAKE) dist

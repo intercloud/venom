@@ -18,6 +18,7 @@ func init() {
 // AssertResponse compares expected and actual responses and raises an error
 // if assertion fails
 func AssertResponse(actual interface{}, expected ...interface{}) error {
+
 	result, ok := actual.(Result)
 	if !ok {
 		return fmt.Errorf("bad actual type: expected: Result, actual: %T", actual)
@@ -209,7 +210,7 @@ func PathToRegexp(path string) string {
 }
 
 // ElementInList tells if given path is in filters list
-func ElementInList(path string, filters[]string) bool {
+func ElementInList(path string, filters []string) bool {
 	for _, filter := range filters {
 		if filter == path {
 			return true

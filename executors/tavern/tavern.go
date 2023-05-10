@@ -101,7 +101,7 @@ func (Executor) ZeroValueResult() interface{} {
 
 // GetDefaultAssertions return default assertions for this executor
 func (Executor) GetDefaultAssertions() *venom.StepAssertions {
-	return &venom.StepAssertions{Assertions: []venom.Assertion{"result AssertResponse"}}
+	return &venom.StepAssertions{Assertions: []venom.Assertion{}}
 }
 
 // Run execute TestStep
@@ -114,7 +114,10 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 
 	// dirty: mapstructure doesn't like decoding map[interface{}]interface{}, let's force manually
 	request := step["request"]
-	mapRequest := request.(map[string]interface{})
+	mapRequest, ok := request.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("request is not map[string]interface{}")
+	}
 	e.Request.MultipartForm = mapRequest["multipart_form"]
 
 	r := Result{}
@@ -143,9 +146,9 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 	}
 
 	if e.Request.TLS.ClientCert != "" {
-		cert, err := tls.X509KeyPair([]byte(e.Request.TLS.ClientCert), []byte(e.Request.TLS.ClientKey))
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse x509 mTLS certificate or key: %s", err)
+		cert, errB := tls.X509KeyPair([]byte(e.Request.TLS.ClientCert), []byte(e.Request.TLS.ClientKey))
+		if errB != nil {
+			return nil, fmt.Errorf("failed to parse x509 mTLS certificate or key: %s", errB)
 		}
 		opts = append(opts, httputil.WithTLSClientAuth(cert))
 	}
@@ -192,9 +195,9 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 	}
 
 	if len(e.Request.Proxy) > 0 {
-		proxyURL, err := url.Parse(e.Request.Proxy)
-		if err != nil {
-			return nil, err
+		proxyURL, errB := url.Parse(e.Request.Proxy)
+		if errB != nil {
+			return nil, errB
 		}
 		tr.Proxy = http.ProxyURL(proxyURL)
 	}
