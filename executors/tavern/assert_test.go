@@ -19,16 +19,20 @@ func TestAssertResponseType(t *testing.T) {
 
 func TestAssertResponseStatusCode(t *testing.T) {
 	result := Result{
-		Expected: Response{StatusCode: 200},
-		Actual:   Response{StatusCode: 200},
+		Actual: Actual{
+			Expected: Response{StatusCode: 200},
+			Actual:   Response{StatusCode: 200},
+		},
 	}
 	err := AssertResponse(result)
 	if err != nil {
 		t.Fatalf("should have succeeded: %v", err)
 	}
 	result = Result{
-		Expected: Response{StatusCode: 200},
-		Actual:   Response{StatusCode: 201},
+		Actual: Actual{
+			Expected: Response{StatusCode: 200},
+			Actual:   Response{StatusCode: 201},
+		},
 	}
 	err = AssertResponse(result)
 	if err == nil {
@@ -42,13 +46,15 @@ func TestAssertResponseStatusCode(t *testing.T) {
 func TestAssertResponseHeaders(t *testing.T) {
 	// nominal case (we accept additional headers in actual)
 	result := Result{
-		Expected: Response{
-			Headers: Headers{"Foo": "Bar"},
-		},
-		Actual: Response{
-			Headers: Headers{
-				"Foo":  "Bar",
-				"Spam": "Eggs",
+		Actual: Actual{
+			Expected: Response{
+				Headers: Headers{"Foo": "Bar"},
+			},
+			Actual: Response{
+				Headers: Headers{
+					"Foo":  "Bar",
+					"Spam": "Eggs",
+				},
 			},
 		},
 	}
@@ -58,14 +64,16 @@ func TestAssertResponseHeaders(t *testing.T) {
 	}
 	// missing header
 	result = Result{
-		Expected: Response{
-			Headers: Headers{
-				"Foo":  "Bar",
-				"Spam": "Eggs",
+		Actual: Actual{
+			Expected: Response{
+				Headers: Headers{
+					"Foo":  "Bar",
+					"Spam": "Eggs",
+				},
 			},
-		},
-		Actual: Response{
-			Headers: Headers{"Foo": "Bar"},
+			Actual: Response{
+				Headers: Headers{"Foo": "Bar"},
+			},
 		},
 	}
 	err = AssertResponse(result)
@@ -77,11 +85,13 @@ func TestAssertResponseHeaders(t *testing.T) {
 	}
 	// bad header
 	result = Result{
-		Expected: Response{
-			Headers: Headers{"Foo": "Bar"},
-		},
-		Actual: Response{
-			Headers: Headers{"Foo": "Baz"},
+		Actual: Actual{
+			Expected: Response{
+				Headers: Headers{"Foo": "Bar"},
+			},
+			Actual: Response{
+				Headers: Headers{"Foo": "Baz"},
+			},
 		},
 	}
 	err = AssertResponse(result)
@@ -93,12 +103,14 @@ func TestAssertResponseHeaders(t *testing.T) {
 	}
 	// nominal case with regexp
 	result = Result{
-		Expected: Response{
-			Headers:        Headers{"Foo": "B.r"},
-			HeadersRegexps: []string{"Foo"},
-		},
-		Actual: Response{
-			Headers: Headers{"Foo": "Bar"},
+		Actual: Actual{
+			Expected: Response{
+				Headers:        Headers{"Foo": "B.r"},
+				HeadersRegexps: []string{"Foo"},
+			},
+			Actual: Response{
+				Headers: Headers{"Foo": "Bar"},
+			},
 		},
 	}
 	err = AssertResponse(result)
@@ -107,12 +119,14 @@ func TestAssertResponseHeaders(t *testing.T) {
 	}
 	// no match with regexp
 	result = Result{
-		Expected: Response{
-			Headers:        Headers{"Foo": "x.*"},
-			HeadersRegexps: []string{"Foo"},
-		},
-		Actual: Response{
-			Headers: Headers{"Foo": "Bar"},
+		Actual: Actual{
+			Expected: Response{
+				Headers:        Headers{"Foo": "x.*"},
+				HeadersRegexps: []string{"Foo"},
+			},
+			Actual: Response{
+				Headers: Headers{"Foo": "Bar"},
+			},
 		},
 	}
 	err = AssertResponse(result)
@@ -123,16 +137,20 @@ func TestAssertResponseHeaders(t *testing.T) {
 
 func TestAssertResponseBody(t *testing.T) {
 	result := Result{
-		Expected: Response{Body: "Foo"},
-		Actual:   Response{Body: "Foo"},
+		Actual: Actual{
+			Expected: Response{Body: "Foo"},
+			Actual:   Response{Body: "Foo"},
+		},
 	}
 	err := AssertResponse(result)
 	if err != nil {
 		t.Fatalf("should have succeeded: %v", err)
 	}
 	result = Result{
-		Expected: Response{Body: "Foo"},
-		Actual:   Response{Body: "Bar"},
+		Actual: Actual{
+			Expected: Response{Body: "Foo"},
+			Actual:   Response{Body: "Bar"},
+		},
 	}
 	err = AssertResponse(result)
 	if err == nil {
@@ -145,16 +163,20 @@ func TestAssertResponseBody(t *testing.T) {
 
 func TestAssertResponseBodyRegexp(t *testing.T) {
 	result := Result{
-		Expected: Response{BodyRegexp: "F.o"},
-		Actual:   Response{Body: "Foo"},
+		Actual: Actual{
+			Expected: Response{BodyRegexp: "F.o"},
+			Actual:   Response{Body: "Foo"},
+		},
 	}
 	err := AssertResponse(result)
 	if err != nil {
 		t.Fatalf("should have succeeded")
 	}
 	result = Result{
-		Expected: Response{BodyRegexp: "x.*"},
-		Actual:   Response{Body: "Foo"},
+		Actual: Actual{
+			Expected: Response{BodyRegexp: "x.*"},
+			Actual:   Response{Body: "Foo"},
+		},
 	}
 	err = AssertResponse(result)
 	if err == nil {
@@ -178,8 +200,10 @@ func TestAssertResponseJson(t *testing.T) {
 		t.Fatalf("unmarshaling JSON: %v", err)
 	}
 	result := Result{
-		Expected: Response{JSON: expected},
-		Actual:   Response{JSON: actual},
+		Actual: Actual{
+			Expected: Response{JSON: expected},
+			Actual:   Response{JSON: actual},
+		},
 	}
 	err = AssertResponse(result)
 	if err != nil {
@@ -191,8 +215,10 @@ func TestAssertResponseJson(t *testing.T) {
 		t.Fatalf("unmarshaling JSON: %v", err)
 	}
 	result = Result{
-		Expected: Response{JSON: expected},
-		Actual:   Response{JSON: actual},
+		Actual: Actual{
+			Expected: Response{JSON: expected},
+			Actual:   Response{JSON: actual},
+		},
 	}
 	err = AssertResponse(result)
 	if err == nil {
@@ -207,8 +233,10 @@ func TestAssertResponseJson(t *testing.T) {
 		t.Fatalf("unmarshaling JSON: %v", err)
 	}
 	result = Result{
-		Expected: Response{JSON: expected},
-		Actual:   Response{JSON: actual},
+		Actual: Actual{
+			Expected: Response{JSON: expected},
+			Actual:   Response{JSON: actual},
+		},
 	}
 	err = AssertResponse(result)
 	if err == nil {
@@ -232,11 +260,13 @@ func TestAssertResponseJsonExcludes(t *testing.T) {
 		t.Fatalf("unmarshaling JSON: %v", err)
 	}
 	result := Result{
-		Expected: Response{
-			JSON:         expected,
-			JSONExcludes: []string{"foo"},
+		Actual: Actual{
+			Expected: Response{
+				JSON:         expected,
+				JSONExcludes: []string{"foo"},
+			},
+			Actual: Response{JSON: actual},
 		},
-		Actual: Response{JSON: actual},
 	}
 	err = AssertResponse(result)
 	if err != nil {
@@ -252,11 +282,13 @@ func TestAssertResponseJsonExcludes(t *testing.T) {
 		t.Fatalf("unmarshaling JSON: %v", err)
 	}
 	result = Result{
-		Expected: Response{
-			JSON:         expected,
-			JSONExcludes: []string{"*/bar"},
+		Actual: Actual{
+			Expected: Response{
+				JSON:         expected,
+				JSONExcludes: []string{"*/bar"},
+			},
+			Actual: Response{JSON: actual},
 		},
-		Actual: Response{JSON: actual},
 	}
 	err = AssertResponse(result)
 	if err != nil {
@@ -272,11 +304,13 @@ func TestAssertResponseJsonExcludes(t *testing.T) {
 		t.Fatalf("unmarshaling JSON: %v", err)
 	}
 	result = Result{
-		Expected: Response{
-			JSON:         expected,
-			JSONExcludes: []string{"0/*/bar"},
+		Actual: Actual{
+			Expected: Response{
+				JSON:         expected,
+				JSONExcludes: []string{"0/*/bar"},
+			},
+			Actual: Response{JSON: actual},
 		},
-		Actual: Response{JSON: actual},
 	}
 	err = AssertResponse(result)
 	if err != nil {
@@ -292,11 +326,13 @@ func TestAssertResponseJsonExcludes(t *testing.T) {
 		t.Fatalf("unmarshaling JSON: %v", err)
 	}
 	result = Result{
-		Expected: Response{
-			JSON:         expected,
-			JSONExcludes: []string{"**/spam"},
+		Actual: Actual{
+			Expected: Response{
+				JSON:         expected,
+				JSONExcludes: []string{"**/spam"},
+			},
+			Actual: Response{JSON: actual},
 		},
-		Actual: Response{JSON: actual},
 	}
 	err = AssertResponse(result)
 	if err != nil {
@@ -317,11 +353,13 @@ func TestAssertResponseJsonRegexps(t *testing.T) {
 		t.Fatalf("unmarshaling JSON: %v", err)
 	}
 	result := Result{
-		Expected: Response{
-			JSON:        expected,
-			JSONRegexps: []string{"foo"},
+		Actual: Actual{
+			Expected: Response{
+				JSON:        expected,
+				JSONRegexps: []string{"foo"},
+			},
+			Actual: Response{JSON: actual},
 		},
-		Actual: Response{JSON: actual},
 	}
 	err = AssertResponse(result)
 	if err != nil {
@@ -333,11 +371,13 @@ func TestAssertResponseJsonRegexps(t *testing.T) {
 		t.Fatalf("unmarshaling JSON: %v", err)
 	}
 	result = Result{
-		Expected: Response{
-			JSON:        expected,
-			JSONRegexps: []string{"foo"},
+		Actual: Actual{
+			Expected: Response{
+				JSON:        expected,
+				JSONRegexps: []string{"foo"},
+			},
+			Actual: Response{JSON: actual},
 		},
-		Actual: Response{JSON: actual},
 	}
 	err = AssertResponse(result)
 	if err == nil {
@@ -506,9 +546,11 @@ func TestPathToRegexp(t *testing.T) {
 func TestCheckAssertions(t *testing.T) {
 	// can't set both body and bodyRegexps assertions
 	result := Result{
-		Expected: Response{
-			Body:       "test",
-			BodyRegexp: "test",
+		Actual: Actual{
+			Expected: Response{
+				Body:       "test",
+				BodyRegexp: "test",
+			},
 		},
 	}
 	err := AssertResponse(result)
@@ -520,9 +562,11 @@ func TestCheckAssertions(t *testing.T) {
 	}
 	// field declared as regexp but not found in headers list
 	result = Result{
-		Expected: Response{
-			Headers:        Headers{"spam": "eggs"},
-			HeadersRegexps: []string{"foo"},
+		Actual: Actual{
+			Expected: Response{
+				Headers:        Headers{"spam": "eggs"},
+				HeadersRegexps: []string{"foo"},
+			},
 		},
 	}
 	err = AssertResponse(result)
@@ -534,9 +578,11 @@ func TestCheckAssertions(t *testing.T) {
 	}
 	// JSON field can't be excluded and declared as regexp
 	result = Result{
-		Expected: Response{
-			JSONExcludes: []string{"foo"},
-			JSONRegexps:  []string{"foo"},
+		Actual: Actual{
+			Expected: Response{
+				JSONExcludes: []string{"foo"},
+				JSONRegexps:  []string{"foo"},
+			},
 		},
 	}
 	err = AssertResponse(result)
