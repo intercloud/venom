@@ -86,10 +86,14 @@ type Executor struct {
 	Response Response `json:"response" yaml:"response"`
 }
 
+type Actual struct {
+	Actual   Response
+	Expected Response
+}
+
 // Result represents a step result. Json and yaml descriptor are used for json output
 type Result struct {
-	Actual      Response
-	Expected    Response
+	Actual      Actual
 	TimeSeconds float64 `json:"time_seconds,omitempty" yaml:"time_seconds,omitempty"`
 	Err         string  `json:"err,omitempty" yaml:"err,omitempty"`
 }
@@ -101,7 +105,7 @@ func (Executor) ZeroValueResult() interface{} {
 
 // GetDefaultAssertions return default assertions for this executor
 func (Executor) GetDefaultAssertions() *venom.StepAssertions {
-	return &venom.StepAssertions{Assertions: []venom.Assertion{}}
+	return &venom.StepAssertions{Assertions: []venom.Assertion{"result.Actual AssertResponse"}}
 }
 
 // Run execute TestStep
@@ -120,9 +124,11 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 	}
 	e.Request.MultipartForm = mapRequest["multipart_form"]
 
-	r := Result{}
-
-	r.Expected = e.Response
+	r := Result{
+		Actual: Actual{
+			Expected: e.Response,
+		},
+	}
 
 	workdir := venom.StringVarFromCtx(ctx, "venom.testsuite.workdir")
 
@@ -231,28 +237,28 @@ func (Executor) Run(ctx context.Context, step venom.TestStep) (interface{}, erro
 			if errr != nil {
 				return nil, errr
 			}
-			r.Actual.Body = string(bb)
+			r.Actual.Actual.Body = string(bb)
 
 			var m interface{}
 			decoder := json.NewDecoder(strings.NewReader(string(bb)))
 			if err := decoder.Decode(&m); err == nil {
-				r.Actual.JSON = m
+				r.Actual.Actual.JSON = m
 			}
 		}
 	}
 
 	if !e.Request.SkipHeaders {
-		r.Actual.Headers = make(map[string]string)
+		r.Actual.Actual.Headers = make(map[string]string)
 		for k, v := range resp.Header {
 			if strings.ToLower(k) == "set-cookie" {
-				r.Actual.Headers[k] = strings.Join(v, "; ")
+				r.Actual.Actual.Headers[k] = strings.Join(v, "; ")
 			} else {
-				r.Actual.Headers[k] = v[0]
+				r.Actual.Actual.Headers[k] = v[0]
 			}
 		}
 	}
 
-	r.Actual.StatusCode = resp.StatusCode
+	r.Actual.Actual.StatusCode = resp.StatusCode
 	return r, nil
 }
 

@@ -19,7 +19,7 @@ func init() {
 // if assertion fails
 func AssertResponse(actual interface{}, expected ...interface{}) error {
 
-	result, ok := actual.(Result)
+	result, ok := actual.(Actual)
 	if !ok {
 		return fmt.Errorf("bad actual type: expected: Result, actual: %T", actual)
 	}
